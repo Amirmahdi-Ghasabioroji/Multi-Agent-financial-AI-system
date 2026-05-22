@@ -1,15 +1,21 @@
 """Financial news loader from public RSS feeds."""
 
+import httpx
 import feedparser
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from data.processors.cleaner import TextCleaner
 from data.processors.metadata import MetadataExtractor
 
+# Reuters discontinued feeds.reuters.com (DNS no longer resolves).
 RSS_FEEDS = [
-    "https://feeds.reuters.com/reuters/businessNews",
-    "https://feeds.reuters.com/reuters/marketsNews",
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
+    "https://www.marketwatch.com/rss/topstories",
 ]
+
+USER_AGENT = "Mozilla/5.0 (compatible; MAFAS/1.0; +https://github.com/mafas-project)"
 
 
 class NewsLoader:
@@ -19,10 +25,23 @@ class NewsLoader:
         self.cleaner = TextCleaner()
         self.metadata_extractor = MetadataExtractor()
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+    def _fetch_rss_xml(self, url: str) -> str:
+        """Download raw RSS XML via httpx (feedparser's urllib fails on some networks)."""
+        with httpx.Client(
+            timeout=20.0,
+            headers={"User-Agent": USER_AGENT},
+            follow_redirects=True,
+        ) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            return response.text
+
     def fetch_feed(self, url: str, max_items: int = 10) -> list[dict]:
         """Parse an RSS feed and return meaningful articles."""
         try:
-            parsed = feedparser.parse(url)
+            xml = self._fetch_rss_xml(url)
+            parsed = feedparser.parse(xml)
             if getattr(parsed, "bozo", False) and not parsed.entries:
                 logger.error("RSS parse error for {}: {}", url, parsed.bozo_exception)
                 return []

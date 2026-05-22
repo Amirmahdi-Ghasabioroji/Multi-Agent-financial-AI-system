@@ -120,8 +120,8 @@ class EDGARLoader:
 
             return self._filings_from_submissions(ticker, form_type, limit)
         except Exception as exc:
-            logger.error("get_recent_filings failed for {}: {}", ticker, exc)
-            return []
+            logger.error("get_recent_filings search failed for {}: {}", ticker, exc)
+            return self._filings_from_submissions(ticker, form_type, limit)
 
     def _filings_from_submissions(
         self,
@@ -168,6 +168,57 @@ class EDGARLoader:
             f"{accession_nodash}/index.json"
         )
 
+    def _select_primary_document(
+        self,
+        items: list[dict],
+        ticker: str,
+        base_url: str,
+    ) -> str | None:
+        """Pick the main 10-Q/10-K HTML (largest .htm), not exhibits or index pages."""
+        ticker_lower = ticker.lower()
+        candidates: list[tuple[int, str]] = []
+
+        for item in items:
+            name = item.get("name", "")
+            lower = name.lower()
+            if not lower.endswith((".htm", ".html")):
+                continue
+            if any(
+                skip in lower
+                for skip in ("index", "exhibit", "ex-", "xsl", "xml", "xsd", "cal", "def", "lab", "pre")
+            ):
+                continue
+            if lower.startswith("r") and lower.endswith(".htm"):
+                continue
+
+            size = 0
+            try:
+                size = int(str(item.get("size", "0")).replace(",", ""))
+            except ValueError:
+                size = 0
+
+            # Prefer ticker-prefixed main filing (e.g. aapl-20251227.htm)
+            if ticker_lower in lower and "exhibit" not in lower:
+                size += 1_000_000
+
+            doc_type = str(item.get("type", "")).upper()
+            if doc_type in ("10-Q", "10-K", "10-K/A", "10-Q/A"):
+                size += 500_000
+
+            candidates.append((size, urljoin(base_url, name)))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            return candidates[0][1]
+
+        # Fallback: full submission text bundle
+        for item in items:
+            name = item.get("name", "")
+            if name.endswith(".txt") and "index" not in name.lower():
+                return urljoin(base_url, name)
+
+        return None
+
     def load_filing_text(self, ticker: str, accession_number: str) -> dict | None:
         """Download primary filing document and return cleaned text."""
         try:
@@ -180,31 +231,19 @@ class EDGARLoader:
             response = self._get(index_url)
             index_data = response.json()
 
-            doc_url: str | None = None
+            base_url = index_url.replace("index.json", "")
             items = index_data.get("directory", {}).get("item", [])
-            for item in items:
-                name = item.get("name", "")
-                if name.endswith((".htm", ".html", ".txt")) and "index" not in name.lower():
-                    if item.get("type") in ("10-Q", "10-K", "10-K/A", "10-Q/A") or (
-                        ticker.lower() in name.lower()
-                        or name.endswith(".htm")
-                    ):
-                        doc_url = urljoin(index_url.replace("index.json", ""), name)
-                        break
-
-            if not doc_url:
-                for item in items:
-                    name = item.get("name", "")
-                    if name.endswith((".htm", ".html")) and not name.startswith("R"):
-                        doc_url = urljoin(index_url.replace("index.json", ""), name)
-                        break
+            doc_url = self._select_primary_document(items, ticker, base_url)
 
             if not doc_url:
                 logger.error("No primary document found for {}", accession_number)
                 return None
 
             doc_response = self._get(doc_url)
-            cleaned = self.cleaner.clean_html(doc_response.text)
+            if doc_url.lower().endswith(".txt"):
+                cleaned = self.cleaner.clean(doc_response.text)
+            else:
+                cleaned = self.cleaner.clean_html(doc_response.text)
 
             if not self.cleaner.is_meaningful(cleaned, min_words=500):
                 logger.warning("Filing too short, skipping: {}", accession_number)

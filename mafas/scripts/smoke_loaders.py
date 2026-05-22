@@ -31,13 +31,13 @@ def fail(label: str, detail: str = "") -> None:
 
 
 def check_news() -> bool:
-    print("\n--- NewsLoader (Reuters RSS) ---")
+    print("\n--- NewsLoader (BBC / CNBC / MarketWatch RSS) ---")
     try:
         from data.loaders.news import NewsLoader
 
         articles = NewsLoader().load_all(max_per_feed=3)
         if not articles:
-            fail("load_all", "0 articles (RSS blocked or feeds down)")
+            fail("load_all", "0 articles (network blocked or feeds unreachable)")
             return False
         a = articles[0]
         ok("load_all", f"{len(articles)} articles")
