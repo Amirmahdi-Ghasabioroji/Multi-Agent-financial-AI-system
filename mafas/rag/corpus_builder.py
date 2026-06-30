@@ -5,11 +5,15 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from data.loaders.edgar import EDGARLoader
 from data.loaders.fomc import FOMCLoader
 from data.loaders.news import NewsLoader
 from rag.chunker import SemanticChunker
 from rag.embedder import TextEmbedder
 from rag.retriever import VectorRetriever
+
+# Mega-cap watchlist for SEC filing ingestion.
+DEFAULT_TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "JPM"]
 
 
 class CorpusBuilder:
@@ -43,13 +47,19 @@ class CorpusBuilder:
         return len(all_chunks)
 
 
-def build_initial_corpus() -> None:
-    """Load FOMC minutes and news, ingest into Qdrant, print summary."""
+def build_initial_corpus(
+    n_fomc: int = 5,
+    max_news_per_feed: int = 10,
+    tickers: list[str] | None = None,
+    filings_per_ticker: int = 1,
+) -> None:
+    """Load FOMC minutes, SEC filings, and news; ingest into Qdrant; print summary."""
     load_dotenv()
 
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
     collection = os.getenv("QDRANT_COLLECTION", "financial_docs")
     cache_dir = os.getenv("CACHE_DIR", "./data/cache")
+    tickers = tickers if tickers is not None else DEFAULT_TICKERS
 
     embedder = TextEmbedder()
     retriever = VectorRetriever(qdrant_url, collection, embedder)
@@ -57,20 +67,31 @@ def build_initial_corpus() -> None:
     corpus_builder = CorpusBuilder(retriever, chunker)
 
     fomc_loader = FOMCLoader(cache_dir=cache_dir)
+    edgar_loader = EDGARLoader(cache_dir=cache_dir)
     news_loader = NewsLoader()
 
-    logger.info("Loading FOMC minutes...")
-    fomc_docs = fomc_loader.load_recent(n=5)
+    logger.info("Loading FOMC minutes (n={})...", n_fomc)
+    fomc_docs = fomc_loader.load_recent(n=n_fomc)
+
+    logger.info("Loading SEC filings for {} tickers...", len(tickers))
+    sec_docs: list[dict] = []
+    for ticker in tickers:
+        docs = edgar_loader.load_recent_for_ticker(ticker, limit=filings_per_ticker)
+        logger.info("  {}: {} filing(s)", ticker, len(docs))
+        sec_docs.extend(docs)
 
     logger.info("Loading news articles...")
-    news_docs = news_loader.load_all(max_per_feed=10)
+    news_docs = news_loader.load_all(max_per_feed=max_news_per_feed)
 
-    all_documents = fomc_docs + news_docs
+    all_documents = fomc_docs + sec_docs + news_docs
     total_chunks = corpus_builder.ingest_documents(all_documents)
     total_vectors = retriever.count()
 
     print(
         f"\nCorpus build complete:\n"
+        f"  FOMC minutes:       {len(fomc_docs)}\n"
+        f"  SEC filings:        {len(sec_docs)}\n"
+        f"  News articles:      {len(news_docs)}\n"
         f"  Documents ingested: {len(all_documents)}\n"
         f"  Chunks created:     {total_chunks}\n"
         f"  Vectors in Qdrant:  {total_vectors}\n"
