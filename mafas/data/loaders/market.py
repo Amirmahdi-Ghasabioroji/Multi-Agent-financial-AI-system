@@ -41,7 +41,11 @@ class MarketDataLoader:
             filtered = series[series.index >= cutoff]
             return filtered
         except Exception as exc:
-            logger.warning("FRED fetch failed for {}: {}", series_id, exc)
+            # Log only the exception type — FRED errors can include the API key
+            # in the request URL embedded in the exception message.
+            logger.warning(
+                "FRED fetch failed for {} ({})", series_id, type(exc).__name__
+            )
             return pd.Series(dtype=float)
 
     def get_vix(self) -> float:
@@ -50,5 +54,5 @@ class MarketDataLoader:
             price = yf.Ticker("^VIX").fast_info["last_price"]
             return float(price)
         except Exception as exc:
-            logger.warning("VIX fetch failed, using fallback 20.0: {}", exc)
+            logger.warning("VIX fetch failed, using fallback 20.0 ({})", type(exc).__name__)
             return 20.0

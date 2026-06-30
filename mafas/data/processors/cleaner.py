@@ -5,7 +5,12 @@ import re
 import unicodedata
 import warnings
 
+import defusedxml.ElementTree as _defused_et
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+
+# Maximum input size for XML parsing (10 MB). Larger inputs are rejected to
+# prevent entity-expansion (billion-laughs) DoS attacks from hostile XML docs.
+_MAX_XML_BYTES = 10 * 1024 * 1024
 
 
 class TextCleaner:
@@ -22,10 +27,24 @@ class TextCleaner:
         return text.strip()
 
     def _parse_markup(self, html: str) -> BeautifulSoup:
-        """Parse HTML or SEC XHTML/XML without spurious parser warnings."""
+        """Parse HTML or SEC XHTML/XML without spurious parser warnings.
+
+        XML documents are first passed through defusedxml to prevent
+        entity-expansion (billion-laughs) and external-entity (XXE) attacks.
+        Input over 10 MB is rejected before parsing.
+        """
         head = html.lstrip()[:500].lower()
-        # SEC EDGAR filings are XHTML/XML; RSS/news summaries are plain HTML.
-        if head.startswith("<?xml") or "xmlns=" in head or "<xbrl" in head:
+        is_xml = head.startswith("<?xml") or "xmlns=" in head or "<xbrl" in head
+
+        if is_xml:
+            raw = html.encode("utf-8", errors="replace")
+            if len(raw) > _MAX_XML_BYTES:
+                raise ValueError(
+                    f"XML document exceeds {_MAX_XML_BYTES // (1024 * 1024)} MB limit"
+                )
+            # defusedxml.ElementTree raises EntitiesForbidden, DTDForbidden, or
+            # ExternalReferenceForbidden on XML bombs, XXE, and billion-laughs.
+            _defused_et.fromstring(raw)
             return BeautifulSoup(html, features="xml")
 
         with warnings.catch_warnings():

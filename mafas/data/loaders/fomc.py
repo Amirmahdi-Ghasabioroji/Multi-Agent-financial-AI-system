@@ -3,6 +3,7 @@
 import hashlib
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import fitz
 import httpx
@@ -19,6 +20,8 @@ USER_AGENT = (
 FOMC_CALENDAR_URL = (
     "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
 )
+# Only fetch minutes from the official Federal Reserve domain.
+_FOMC_ALLOWED_HOST = "www.federalreserve.gov"
 
 
 class FOMCLoader:
@@ -64,6 +67,10 @@ class FOMCLoader:
                 url = href
             else:
                 url = f"https://www.federalreserve.gov{href}"
+            # Allowlist: only accept URLs on the official Fed domain.
+            if urlparse(url).hostname != _FOMC_ALLOWED_HOST:
+                logger.warning("Skipping off-domain FOMC URL: {}", url)
+                continue
             if url in seen_urls:
                 continue
             seen_urls.add(url)
