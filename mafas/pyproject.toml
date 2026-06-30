@@ -12,7 +12,7 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["data*", "rag*"]
+include = ["data*", "rag*", "agents*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

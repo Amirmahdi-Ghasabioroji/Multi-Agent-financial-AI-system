@@ -4,6 +4,7 @@ from data.processors.cleaner import TextCleaner
 from data.processors.metadata import MetadataExtractor
 from rag.chunker import SemanticChunker
 from rag.embedder import TextEmbedder
+from rag.retriever import chunk_point_id
 
 
 class TestTextCleaner:
@@ -78,6 +79,23 @@ class TestMetadataExtractor:
         text = "one two three four five"
         meta = extractor.extract(text, source="test", doc_type="news_article")
         assert meta.word_count == 5
+
+
+class TestDeduplication:
+    def test_point_id_is_deterministic(self) -> None:
+        a = chunk_point_id("same text", "src://doc", 0)
+        b = chunk_point_id("same text", "src://doc", 0)
+        assert a == b
+
+    def test_point_id_differs_on_content(self) -> None:
+        a = chunk_point_id("text one", "src://doc", 0)
+        b = chunk_point_id("text two", "src://doc", 0)
+        assert a != b
+
+    def test_point_id_differs_on_chunk_index(self) -> None:
+        a = chunk_point_id("same text", "src://doc", 0)
+        b = chunk_point_id("same text", "src://doc", 1)
+        assert a != b
 
 
 class TestTextEmbedder:

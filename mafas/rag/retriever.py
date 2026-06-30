@@ -1,5 +1,8 @@
 """Qdrant vector store wrapper for semantic retrieval."""
 
+import hashlib
+import uuid
+
 from loguru import logger
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
@@ -14,6 +17,21 @@ from qdrant_client.http.models import (
 
 from rag.embedder import TextEmbedder
 
+# Fixed namespace so the same chunk always maps to the same point ID,
+# making re-ingestion idempotent (duplicates overwrite in place).
+_POINT_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
+
+
+def chunk_point_id(text: str, source: str, chunk_index: int) -> str:
+    """Deterministic UUID for a chunk based on its content and origin.
+
+    Identical content from the same source/position yields the same ID, so
+    upserting it again overwrites the existing point instead of duplicating it.
+    """
+    digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+    key = f"{source}|{chunk_index}|{digest}"
+    return str(uuid.uuid5(_POINT_NAMESPACE, key))
+
 
 class VectorRetriever:
     """Manages a Qdrant collection for document chunk storage and search."""
@@ -23,19 +41,25 @@ class VectorRetriever:
         url: str,
         collection_name: str,
         embedder: TextEmbedder,
+        recreate: bool = False,
     ) -> None:
         self.client = QdrantClient(url=url)
         self.collection_name = collection_name
         self.embedder = embedder
-        self._ensure_collection()
+        self._ensure_collection(recreate=recreate)
 
-    def _ensure_collection(self) -> None:
-        """Create the collection if it does not already exist."""
+    def _ensure_collection(self, recreate: bool = False) -> None:
+        """Create the collection if needed; optionally drop and recreate it."""
         collections = self.client.get_collections().collections
         names = {c.name for c in collections}
+
         if self.collection_name in names:
-            logger.info("Using existing collection '{}'", self.collection_name)
-            return
+            if not recreate:
+                logger.info("Using existing collection '{}'", self.collection_name)
+                return
+            self.client.delete_collection(self.collection_name)
+            logger.info("Dropped existing collection '{}'", self.collection_name)
+
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=VectorParams(
@@ -51,24 +75,31 @@ class VectorRetriever:
         return info.points_count or 0
 
     def upsert(self, chunks: list[dict]) -> None:
-        """Embed and upsert document chunks in batches of 100."""
+        """Embed and upsert chunks with deterministic IDs (deduplicated)."""
         if not chunks:
             return
 
-        texts = [c["text"] for c in chunks]
+        # Collapse exact duplicate chunks within this batch up front.
+        unique: dict[str, dict] = {}
+        for chunk in chunks:
+            metadata = chunk.get("metadata", {})
+            point_id = chunk_point_id(
+                chunk["text"],
+                str(metadata.get("source", "")),
+                int(metadata.get("chunk_index", 0)),
+            )
+            unique[point_id] = chunk
+
+        before = self.count()
+        point_ids = list(unique.keys())
+        texts = [unique[pid]["text"] for pid in point_ids]
         vectors = self.embedder.embed_batch(texts)
-        start_id = self.count()
 
         points: list[PointStruct] = []
-        for offset, chunk in enumerate(chunks):
+        for pid, vector in zip(point_ids, vectors):
+            chunk = unique[pid]
             payload = {**chunk["metadata"], "text": chunk["text"]}
-            points.append(
-                PointStruct(
-                    id=start_id + offset,
-                    vector=vectors[offset],
-                    payload=payload,
-                )
-            )
+            points.append(PointStruct(id=pid, vector=vector, payload=payload))
 
         batch_size = 100
         for i in range(0, len(points), batch_size):
@@ -77,7 +108,18 @@ class VectorRetriever:
                 points=points[i : i + batch_size],
             )
 
-        logger.info("Upserted {} points to '{}'", len(points), self.collection_name)
+        after = self.count()
+        skipped = len(chunks) - len(points)
+        logger.info(
+            "Upsert: {} chunks in ({} intra-batch dupes), {} new, {} overwritten; "
+            "collection {} -> {} points",
+            len(chunks),
+            skipped,
+            after - before,
+            len(points) - (after - before),
+            before,
+            after,
+        )
 
     def search(
         self,
@@ -103,14 +145,16 @@ class VectorRetriever:
             )
         query_filter = Filter(must=conditions) if conditions else None
 
-        hits = self.client.search(
+        # qdrant-client >=1.10 uses query_points(); .search() was removed.
+        response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             query_filter=query_filter,
             limit=top_k,
             score_threshold=score_threshold,
             with_payload=True,
         )
+        hits = response.points
 
         results: list[dict] = []
         for hit in hits:

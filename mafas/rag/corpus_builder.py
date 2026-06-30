@@ -1,5 +1,6 @@
 """Orchestrates document ingestion into the vector store."""
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -52,8 +53,14 @@ def build_initial_corpus(
     max_news_per_feed: int = 10,
     tickers: list[str] | None = None,
     filings_per_ticker: int = 1,
+    reset: bool = False,
 ) -> None:
-    """Load FOMC minutes, SEC filings, and news; ingest into Qdrant; print summary."""
+    """Load FOMC minutes, SEC filings, and news; ingest into Qdrant; print summary.
+
+    Ingestion is idempotent: chunks use deterministic content-hash IDs, so
+    re-running never creates duplicates. Pass reset=True to drop and rebuild
+    the collection from scratch (useful to purge legacy duplicate points).
+    """
     load_dotenv()
 
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -62,7 +69,7 @@ def build_initial_corpus(
     tickers = tickers if tickers is not None else DEFAULT_TICKERS
 
     embedder = TextEmbedder()
-    retriever = VectorRetriever(qdrant_url, collection, embedder)
+    retriever = VectorRetriever(qdrant_url, collection, embedder, recreate=reset)
     chunker = SemanticChunker()
     corpus_builder = CorpusBuilder(retriever, chunker)
 
@@ -99,4 +106,13 @@ def build_initial_corpus(
 
 
 if __name__ == "__main__":
-    build_initial_corpus()
+    parser = argparse.ArgumentParser(
+        description="Build the MAFAS document corpus in Qdrant."
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Drop and recreate the collection before ingesting (purges duplicates).",
+    )
+    args = parser.parse_args()
+    build_initial_corpus(reset=args.reset)
