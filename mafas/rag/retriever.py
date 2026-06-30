@@ -15,6 +15,7 @@ from qdrant_client.http.models import (
     VectorParams,
 )
 
+from data.processors.metadata import date_to_int
 from rag.embedder import TextEmbedder
 
 # Fixed namespace so the same chunk always maps to the same point ID,
@@ -99,6 +100,10 @@ class VectorRetriever:
         for pid, vector in zip(point_ids, vectors):
             chunk = unique[pid]
             payload = {**chunk["metadata"], "text": chunk["text"]}
+            # Sortable integer date (YYYYMMDD) enables reliable range filtering.
+            date_int = date_to_int(payload.get("date"))
+            if date_int is not None:
+                payload["date_ts"] = date_int
             points.append(PointStruct(id=pid, vector=vector, payload=payload))
 
         batch_size = 100
@@ -140,9 +145,15 @@ class VectorRetriever:
                 )
             )
         if date_after:
-            conditions.append(
-                FieldCondition(key="date", range=Range(gte=date_after))
-            )
+            date_after_int = date_to_int(date_after)
+            if date_after_int is not None:
+                conditions.append(
+                    FieldCondition(key="date_ts", range=Range(gte=date_after_int))
+                )
+            else:
+                logger.warning(
+                    "Ignoring date_after='{}' (expected YYYY-MM-DD)", date_after
+                )
         query_filter = Filter(must=conditions) if conditions else None
 
         # qdrant-client >=1.10 uses query_points(); .search() was removed.

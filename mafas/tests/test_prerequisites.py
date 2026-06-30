@@ -1,7 +1,11 @@
 """Prerequisite unit tests for MAFAS data and RAG foundation."""
 
 from data.processors.cleaner import TextCleaner
-from data.processors.metadata import MetadataExtractor
+from data.processors.metadata import (
+    MetadataExtractor,
+    date_to_int,
+    normalize_date,
+)
 from rag.chunker import SemanticChunker
 from rag.embedder import TextEmbedder
 from rag.retriever import chunk_point_id
@@ -66,7 +70,8 @@ class TestMetadataExtractor:
         extractor = MetadataExtractor()
         text = "The committee met in January 2024 to review policy."
         meta = extractor.extract(text, source="test", doc_type="fomc_minutes")
-        assert "January 2024" in meta.date
+        # Normalised: a month/year with no day defaults to the 1st.
+        assert meta.date == "2024-01-01"
 
     def test_date_unknown_when_missing(self) -> None:
         extractor = MetadataExtractor()
@@ -74,11 +79,45 @@ class TestMetadataExtractor:
         meta = extractor.extract(text, source="test", doc_type="news_article")
         assert meta.date == "unknown"
 
+    def test_explicit_date_kwarg_is_normalised(self) -> None:
+        extractor = MetadataExtractor()
+        meta = extractor.extract(
+            "Body text", source="test", doc_type="sec_filing", date="20260130"
+        )
+        assert meta.date == "2026-01-30"
+
     def test_word_count_populated(self) -> None:
         extractor = MetadataExtractor()
         text = "one two three four five"
         meta = extractor.extract(text, source="test", doc_type="news_article")
         assert meta.word_count == 5
+
+
+class TestDateNormalization:
+    def test_iso_passthrough(self) -> None:
+        assert normalize_date("2026-01-30") == "2026-01-30"
+
+    def test_long_form(self) -> None:
+        assert normalize_date("April 28, 2026") == "2026-04-28"
+
+    def test_month_year_defaults_to_first(self) -> None:
+        assert normalize_date("January 2024") == "2024-01-01"
+
+    def test_compact_yyyymmdd(self) -> None:
+        assert normalize_date("20260429") == "2026-04-29"
+
+    def test_rfc822_from_rss(self) -> None:
+        assert normalize_date("Mon, 30 Jun 2026 09:15:00 GMT") == "2026-06-30"
+
+    def test_unknown_and_empty(self) -> None:
+        assert normalize_date("") == "unknown"
+        assert normalize_date("not a date") == "unknown"
+        assert normalize_date(None) == "unknown"
+
+    def test_date_to_int_sortable(self) -> None:
+        assert date_to_int("2026-01-30") == 20260130
+        assert date_to_int("unknown") is None
+        assert date_to_int(None) is None
 
 
 class TestDeduplication:
