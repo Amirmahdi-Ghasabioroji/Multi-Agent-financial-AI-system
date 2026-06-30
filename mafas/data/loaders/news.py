@@ -63,10 +63,10 @@ class NewsLoader:
                     full_text,
                     source=link,
                     doc_type="news_article",
+                    date=published,
                 )
                 meta = metadata.model_dump()
                 meta["title"] = title
-                meta["date"] = published if published else meta["date"]
                 articles.append({"text": full_text, "metadata": meta})
 
             return articles

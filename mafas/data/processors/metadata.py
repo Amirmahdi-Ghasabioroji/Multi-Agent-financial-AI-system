@@ -1,9 +1,63 @@
 """Document metadata models and extraction."""
 
 import re
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+# Accepted input date formats, tried in order. Day-less formats default to the 1st.
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%B %d, %Y",
+    "%b %d, %Y",
+    "%d %B %Y",
+    "%d %b %Y",
+    "%B %Y",
+    "%b %Y",
+    "%Y%m%d",
+    "%m/%d/%Y",
+]
+
+
+def normalize_date(raw: str | None) -> str:
+    """Normalise a raw date string to ISO 'YYYY-MM-DD', or 'unknown'.
+
+    Handles ISO dates, 'April 28, 2026', 'January 2024' (-> 2024-01-01),
+    compact '20260429', and RFC822 strings from RSS feeds.
+    """
+    if not raw:
+        return "unknown"
+    value = raw.strip()
+    if not value or value.lower() == "unknown":
+        return "unknown"
+
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    try:
+        parsed = parsedate_to_datetime(value)
+        if parsed is not None:
+            return parsed.strftime("%Y-%m-%d")
+    except (TypeError, ValueError, IndexError):
+        pass
+
+    return "unknown"
+
+
+def date_to_int(iso_date: str | None) -> int | None:
+    """Convert 'YYYY-MM-DD' to a sortable integer YYYYMMDD, or None."""
+    if not iso_date or iso_date == "unknown":
+        return None
+    try:
+        return int(datetime.strptime(iso_date, "%Y-%m-%d").strftime("%Y%m%d"))
+    except ValueError:
+        return None
 
 
 class DocumentMetadata(BaseModel):
@@ -41,9 +95,20 @@ class MetadataExtractor:
         doc_type: str,
         **kwargs: Any,
     ) -> DocumentMetadata:
-        """Build DocumentMetadata from text and optional kwargs."""
+        """Build DocumentMetadata from text and optional kwargs.
+
+        Pass date=<str> to supply an authoritative date (e.g. a filing date or
+        RSS published date); it is normalised to ISO. Otherwise the date is
+        extracted from the text via regex and normalised.
+        """
         title = self._infer_title(text)
-        date = self._extract_date(text)
+        explicit_date = kwargs.get("date")
+        if explicit_date:
+            date = normalize_date(explicit_date)
+            if date == "unknown":
+                date = normalize_date(self._extract_date(text))
+        else:
+            date = normalize_date(self._extract_date(text))
         tickers: list[str] = kwargs.get("tickers", [])
         word_count = len(text.split())
         return DocumentMetadata(

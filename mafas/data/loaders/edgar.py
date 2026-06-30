@@ -219,7 +219,12 @@ class EDGARLoader:
 
         return None
 
-    def load_filing_text(self, ticker: str, accession_number: str) -> dict | None:
+    def load_filing_text(
+        self,
+        ticker: str,
+        accession_number: str,
+        filing_date: str | None = None,
+    ) -> dict | None:
         """Download primary filing document and return cleaned text."""
         try:
             cik = self._resolve_cik(ticker)
@@ -254,6 +259,7 @@ class EDGARLoader:
                 source=doc_url,
                 doc_type="sec_filing",
                 tickers=[ticker.upper()],
+                date=filing_date,
             )
             meta = metadata.model_dump()
             meta["accession_number"] = accession_number
@@ -275,6 +281,7 @@ class EDGARLoader:
             loaded = self.load_filing_text(
                 ticker,
                 filing["accession_number"],
+                filing_date=filing.get("date"),
             )
             if loaded is not None:
                 documents.append(loaded)

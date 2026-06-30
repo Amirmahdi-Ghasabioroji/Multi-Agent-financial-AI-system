@@ -99,10 +99,15 @@ class FOMCLoader:
                 logger.warning("FOMC document too short, skipping: {}", url)
                 return None
 
+            # The meeting date is encoded in the URL (fomcminutesYYYYMMDD).
+            date_match = re.search(r"fomcminutes(\d{8})", url)
+            authoritative_date = date_match.group(1) if date_match else None
+
             metadata = self.metadata_extractor.extract(
                 cleaned,
                 source=url,
                 doc_type="fomc_minutes",
+                date=authoritative_date,
             )
             return {"text": cleaned, "metadata": metadata.model_dump()}
         except Exception as exc:
