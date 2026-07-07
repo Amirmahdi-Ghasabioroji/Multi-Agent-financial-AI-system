@@ -11,6 +11,14 @@ from agents.risk_schemas import (
     RiskSummary,
 )
 from agents.schemas import KeyPoint, MacroBriefing, SourceCitation
+from agents.strategy import StrategyAgent, build_strategy_agent
+from agents.strategy_playbooks import PLAYBOOKS, Playbook, rank_playbooks
+from agents.strategy_schemas import (
+    MacroBias,
+    PlaybookScore,
+    StrategyReport,
+    StrategySetup,
+)
 
 __all__ = [
     "AnalystAgent",
@@ -23,6 +31,15 @@ __all__ = [
     "CorrelationWarning",
     "ConcentrationRisk",
     "PositionSizingConstraint",
+    "StrategyAgent",
+    "build_strategy_agent",
+    "StrategyReport",
+    "StrategySetup",
+    "MacroBias",
+    "PlaybookScore",
+    "PLAYBOOKS",
+    "Playbook",
+    "rank_playbooks",
     "OllamaClient",
     "OllamaError",
     "MacroBriefing",
