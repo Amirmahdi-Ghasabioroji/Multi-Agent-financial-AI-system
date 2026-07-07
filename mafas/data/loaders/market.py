@@ -22,9 +22,11 @@ class MarketDataLoader:
         df = yf.download(ticker, period=f"{days}d", progress=False)
         if df.empty:
             raise ValueError(f"No OHLCV data returned for ticker '{ticker}'")
-        df.columns = [str(c).lower() for c in df.columns]
+        # yfinance returns MultiIndex columns (field, ticker); flatten to the
+        # field level BEFORE lowercasing so 'Close' -> 'close' resolves cleanly.
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0].lower() if isinstance(c, tuple) else str(c).lower() for c in df.columns]
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).lower() for c in df.columns]
         df = df.dropna()
         if df.empty:
             raise ValueError(f"OHLCV data for '{ticker}' is empty after dropping NaNs")
