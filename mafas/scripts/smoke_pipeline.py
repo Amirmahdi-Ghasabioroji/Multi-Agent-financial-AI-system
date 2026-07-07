@@ -37,7 +37,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_QUERY = "What is the Federal Reserve's current stance on interest rates and inflation?"
+DEFAULT_QUERY = "latest financial market news and stock movements"
 
 
 def ok(label: str, detail: str = "") -> None:
