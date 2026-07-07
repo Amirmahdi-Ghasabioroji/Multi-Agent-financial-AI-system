@@ -1,10 +1,12 @@
 """
-Smoke-test the end-to-end Analyst -> Risk pipeline (live network + Ollama).
+Smoke-test the end-to-end Analyst -> Risk -> Strategy pipeline (live + Ollama).
 
 This exercises the full Phase-1 flow:
     1. Analyst Agent runs RAG over Qdrant + Ollama to produce a MacroBriefing.
     2. Risk Agent consumes that briefing, pulls live market data via yfinance,
        computes deterministic risk metrics, and adds an Ollama narrative.
+    3. Strategy Agent consumes both, scores the playbooks, and reasons over the
+       top candidates to produce instrument-bound setup suggestions.
 
 Prerequisites (run from anywhere after: cd mafas && pip install -e .):
     * Qdrant running and the corpus ingested   (docker compose up -d)
@@ -22,6 +24,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
+
+# Ensure the project root (parent of scripts/) is importable, so the agents /
+# rag / data packages resolve even when this file is launched as
+# `python scripts/smoke_pipeline.py` (which otherwise puts scripts/ on sys.path).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from dotenv import load_dotenv
 
@@ -135,6 +145,38 @@ def run_risk(briefing, tickers: list[str], lookback: int, use_llm: bool):
         return None
 
 
+def run_strategy(briefing, summary, use_llm: bool):
+    """Produce a StrategyReport from the Analyst briefing + Risk summary."""
+    print("\n--- Strategy Agent (playbook scoring + Ollama reasoning) ---")
+    if summary is None:
+        fail("decide", "no risk summary available from prior stage")
+        return None
+    try:
+        from agents.strategy import build_strategy_agent
+
+        agent = build_strategy_agent(with_llm=use_llm)
+        report = agent.decide(summary, briefing=briefing)
+
+        ok("macro_bias", f"{report.macro_bias.direction.upper()} "
+                         f"(strength {report.macro_bias.strength:.0%}, via {report.macro_bias.source})")
+        ok("candidate_scores", f"{len(report.candidate_scores)} playbooks scored")
+        top = report.candidate_scores[0] if report.candidate_scores else None
+        if top:
+            ok("top_playbook", f"{top.name} ({top.score:.2f})")
+        if not report.setups:
+            fail("setups", "no setups produced")
+            return None
+        ok("setups", f"{len(report.setups)} setup(s)")
+        for s in report.setups:
+            inst = s.instrument or "—"
+            ok("  setup", f"{s.strategy_name} | {inst} {s.direction.upper()} | conf {s.confidence:.0%}")
+        ok("llm_used", str(report.llm_used))
+        return report
+    except Exception as exc:
+        fail("StrategyAgent", f"{type(exc).__name__}: {exc}")
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="MAFAS end-to-end Analyst -> Risk pipeline smoke test."
@@ -168,22 +210,27 @@ def main() -> int:
     check_ollama(use_llm)
     briefing = run_analyst(args.query, use_llm)
     summary = run_risk(briefing, args.tickers, args.lookback, use_llm)
+    report = run_strategy(briefing, summary, use_llm)
 
     if args.show_reports:
         if briefing is not None:
             print("\n" + briefing.render())
         if summary is not None:
             print("\n" + summary.render())
+        if report is not None:
+            print("\n" + report.render())
 
-    # The pipeline "passes" if the Risk Agent produced a usable summary; the
-    # Analyst may legitimately return an empty briefing if the corpus is bare.
+    # The pipeline "passes" if each stage produced a usable object; the Analyst
+    # may legitimately return an empty briefing if the corpus is bare.
     analyst_ok = briefing is not None
     risk_ok = summary is not None and bool(summary.per_asset)
-    passed = int(analyst_ok) + int(risk_ok)
-    print(f"\n=== Result: {passed}/2 stages passed "
+    strategy_ok = report is not None and bool(report.setups)
+    passed = int(analyst_ok) + int(risk_ok) + int(strategy_ok)
+    print(f"\n=== Result: {passed}/3 stages passed "
           f"(analyst={'ok' if analyst_ok else 'fail'}, "
-          f"risk={'ok' if risk_ok else 'fail'}) ===\n")
-    return 0 if passed == 2 else 1
+          f"risk={'ok' if risk_ok else 'fail'}, "
+          f"strategy={'ok' if strategy_ok else 'fail'}) ===\n")
+    return 0 if passed == 3 else 1
 
 
 if __name__ == "__main__":
