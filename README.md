@@ -20,7 +20,53 @@ Execution Agent →  TradeCard[]      (Monte Carlo trade simulation)
 LangGraph orchestrator → PipelineResult (with broaden-retry loop + no-trade gate)
 ```
 
-## Quick start
+## Full dashboard
+
+The `UI-dashboard` application adds a dark, local financial workstation around
+the same tested agent classes. It supports:
+
+- full Analyst → Risk → Strategy → Execution conversations with live stage
+  events, bounded contextual follow-ups, retries and no-trade explanations;
+- guided and advanced-JSON workspaces for every agent individually;
+- detailed source, confidence, volatility, correlation, playbook, sizing and
+  Monte Carlo views;
+- MySQL-backed conversations and run history, deterministic demo runs, corpus
+  refresh/reset controls, and JSON/Markdown/print-to-PDF reports.
+
+The dashboard remains a **research and simulation tool**. It cannot place
+orders or connect to a brokerage.
+
+### Dashboard quick start
+
+Prerequisites: Docker Desktop and a host Ollama installation for live LLM runs.
+Demo mode does not require Ollama or a populated Qdrant corpus.
+
+```powershell
+copy .env.example .env
+# Replace the two MySQL passwords in .env.
+
+# If the earlier Qdrant-only stack is running, stop its container first.
+# This does not delete the shared corpus volume:
+cd mafas
+docker compose down
+cd ..
+
+ollama pull mistral
+# Ollama Desktop normally serves automatically; otherwise run: ollama serve
+
+docker compose up --build
+```
+
+Open `http://localhost:3000`. The API/OpenAPI documentation is available at
+`http://localhost:8000/docs`. The full-stack Compose file reuses the existing
+`mafas_qdrant_storage` volume, so previously ingested documents remain
+available. The Data & Services page shows dependency health and can safely
+refresh or explicitly reset the corpus.
+
+Stop the stack with `docker compose down`. Add `-v` only when you intentionally
+want to delete both MySQL history and the dashboard-managed data volumes.
+
+## CLI quick start
 
 ```bash
 cd mafas
@@ -139,7 +185,7 @@ IDs, so no duplicates); add `--reset` to drop and rebuild the collection.
 ## Testing
 
 ```powershell
-.\.venv\Scripts\pytest tests/ -v                       # 97 unit tests, mocked LLM/data
+.\.venv\Scripts\pytest tests/ -v                       # 101 unit tests, mocked LLM/data
 .\.venv\Scripts\python scripts/smoke_loaders.py        # live loader checks
 .\.venv\Scripts\python scripts/smoke_pipeline.py --tickers TSLA --show-reports   # live 4-stage
 ```
@@ -170,6 +216,7 @@ EXECUTION_ACCOUNT_EQUITY=100000
 ## Status
 
 All four agents + the LangGraph orchestration layer are implemented, tested
-(97 passing unit tests), and verified end-to-end live.
+(101 passing core unit tests), and verified end-to-end live. Dashboard/API and
+browser tests live in `backend/tests/` and `frontend/`.
 
 See `PROJECT_OVERVIEW.md` for a full architecture and implementation reference.

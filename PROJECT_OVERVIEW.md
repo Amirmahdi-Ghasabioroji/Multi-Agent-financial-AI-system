@@ -5,7 +5,8 @@
 > architecture, every module, key design decisions, conventions, gotchas, and how
 > to run/test everything. Keep it updated as the project evolves.
 
-Last updated: covers Analyst, Risk, Strategy, Execution agents + LangGraph orchestrator.
+Last updated: covers all four agents, LangGraph orchestration, and the full
+Next.js/FastAPI/MySQL dashboard.
 
 ---
 
@@ -38,8 +39,12 @@ is unavailable. No paid APIs anywhere.
 - **OS**: Windows, PowerShell. Repo root: `d:\QMUL\Summer project\Multi-Agent-financial-AI-system`. Code lives under `mafas/`.
 - **ALWAYS use the venv interpreter**: `.\.venv\Scripts\python` (the venv is Python 3.10, torch 2.12, transformers 5.9, sentence-transformers 5.5). The **global** Python is broken/incomplete (old torch, missing deps) — running bare `python` causes `ModuleNotFoundError` and torch import errors. This has bitten us before.
 - **Imports**: `from data...`, `from rag...`, `from agents...`. Run `pip install -e .` from `mafas/` (editable install via `pyproject.toml`, which includes `data*`, `rag*`, `agents*`). Or `cd mafas` + `$env:PYTHONPATH="."`. Never run module files by path; use `python -m package.module`.
-- **Run everything from the `mafas/` directory.**
-- Qdrant runs via `docker compose up -d` (no account needed). Healthcheck uses `/readyz` (not `/health`, which newer Qdrant removed).
+- Run **agent CLIs/tests** from `mafas/`; run the **full dashboard Compose
+  stack** from the repository root.
+- Qdrant needs no account. The legacy `mafas/docker-compose.yml` runs Qdrant
+  alone; the root Compose stack runs it with the dashboard and reuses the same
+  named volume. Do not run both Compose projects simultaneously because they
+  bind the same ports. Healthcheck uses `/readyz` (not `/health`).
 - Ollama: `ollama pull mistral` + `ollama serve` → `http://localhost:11434`. Free, local.
 - HF Hub warning about `HF_TOKEN` on embedder load is harmless (anonymous model download for `all-MiniLM-L6-v2`).
 
@@ -48,6 +53,17 @@ is unavailable. No paid APIs anywhere.
 ## 3. Repository layout
 
 ```
+backend/
+  app/                  FastAPI API, jobs, persistence, SSE, reports, health
+  tests/                API/job/persistence tests
+  Dockerfile
+frontend/
+  src/app/              Next.js App Router pages
+  src/components/       shell, forms, timelines, agent result visualisations
+  src/lib/              typed API client, schemas/helpers
+  Dockerfile
+docker-compose.yml      Full dashboard: frontend + backend + MySQL + Qdrant
+.env.example            Full-stack local configuration
 mafas/
   data/
     loaders/
@@ -185,7 +201,7 @@ ollama serve                                   # + ollama pull mistral (once)
 .\.venv\Scripts\python -m agents.orchestrator "obscure query" --no-llm
 
 # tests + smoke
-.\.venv\Scripts\pytest tests/ -v                # 97 tests
+.\.venv\Scripts\pytest tests/ -v                # 101 core tests
 .\.venv\Scripts\python scripts/smoke_pipeline.py --tickers TSLA --show-reports
 ```
 
@@ -217,14 +233,67 @@ deterministic, offline operation.
 
 ## 10. Test counts & status
 
-- 97 unit tests passing (prerequisites, analyst, risk, strategy, execution, orchestrator), all mocked (no network/LLM).
+- 101 core unit tests passing (prerequisites, analyst, risk, strategy,
+  execution, orchestrator and dashboard-facing progress contracts), all mocked
+  (no network/LLM).
 - Live 4-stage `smoke_pipeline.py` and orchestrator verified end-to-end.
 
 ---
 
-## 11. Possible next steps (not yet built)
+## 11. Dashboard architecture
 
-- Corpus refresh mechanism: incremental `refresh_corpus()`, staleness warning, or scheduled ingestion (currently manual only).
+The dashboard is a thin interface over the existing Python domain layer; it
+does not duplicate agent calculations:
+
+```
+Browser (Next.js)
+  ↕ REST + Server-Sent Events
+FastAPI API
+  ├─ bounded background job runner
+  ├─ MySQL conversations, events and structured results
+  ├─ LangGraph RiskPipeline / individual agent factories
+  └─ health, corpus controls and report exports
+       ↕
+Qdrant + host Ollama + market/document APIs
+```
+
+- **Full workspace**: one-shot runs and bounded, context-aware follow-ups. The
+  current question remains the RAG retrieval query; up to three recent turns
+  are supplied separately as explicitly untrusted context so chat history does
+  not become financial evidence or override prompts.
+- **Individual workspaces**: Analyst, Risk, Strategy and Execution each expose
+  guided inputs plus validated advanced JSON. Stored upstream artifacts can be
+  reused rather than copied manually.
+- **Live progress**: the orchestrator and corpus builder emit optional
+  best-effort callbacks. FastAPI persists these as job events and streams them
+  over SSE; callback failures can never break the underlying analysis.
+- **Persistence**: MySQL stores conversations, messages, job metadata, stage
+  events and final JSON. It does not copy Qdrant documents, market history or
+  binary PDFs. Reports are regenerated as JSON/Markdown or printed to PDF in
+  the browser.
+- **Demo mode**: deterministic fixtures use the same job/event/result UI path
+  and are clearly labelled. Live mode uses Qdrant, Ollama and market sources.
+- **Safety**: no authentication is needed for this localhost-only owner tool.
+  Corpus reset still requires the exact typed phrase `RESET FINANCIAL DOCS`.
+  The product is simulation-only and has no brokerage/order endpoint.
+- **Infrastructure**: root `docker-compose.yml` starts Next.js, FastAPI, MySQL
+  and Qdrant. Ollama remains host-native and is reached from the backend via
+  `host.docker.internal`. The explicitly named Qdrant volume preserves the
+  corpus created by the original Qdrant-only Compose setup.
+
+Dashboard outputs map directly to the Pydantic contracts. The Risk schema also
+contains the complete pairwise correlation matrix for the heatmap, and
+`RiskPipeline.run()` accepts optional progress/context arguments while
+remaining backward-compatible with CLI callers.
+
+---
+
+## 12. Possible next steps
+
+- Scheduled corpus refresh (the dashboard currently provides explicit,
+  job-tracked refresh/reset actions).
 - Richer simulation: intrabar high/low modelling (currently close-to-close), strategy-implied drift, pairs/spread backtest so market-neutral setups aren't skipped.
-- Persist `PipelineResult` artifacts (JSON) for a demo UI or history.
-- Architecture diagram / write-up for submission.
+- Optional multi-user authentication if the dashboard is ever exposed beyond
+  localhost.
+- Production queue/object storage if deployment moves beyond the single-owner
+  local Docker model.
