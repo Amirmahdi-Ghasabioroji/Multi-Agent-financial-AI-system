@@ -1,5 +1,6 @@
 """SEC EDGAR filings loader."""
 
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
@@ -7,7 +8,12 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from data.processors.cleaner import TextCleaner
 from data.processors.metadata import MetadataExtractor
@@ -27,12 +33,26 @@ class EDGARLoader:
         self.metadata_extractor = MetadataExtractor()
         self._cik_cache: dict[str, str] = {}
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=8),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.TimeoutException)),
+        reraise=True,
+    )
     def _get(self, url: str, timeout: float = 30.0) -> httpx.Response:
         with httpx.Client(timeout=timeout, headers=SEC_HEADERS) as client:
             response = client.get(url)
             response.raise_for_status()
+            # SEC fair-access policy caps clients at 10 requests/second; a short
+            # pause keeps us well under the limit and avoids 403 throttling.
+            time.sleep(0.12)
             return response
+
+    @staticmethod
+    def _cik_from_accession(accession_number: str) -> str | None:
+        """The archive path CIK is the filer prefix of the accession number."""
+        prefix = accession_number.split("-")[0]
+        return prefix if prefix.isdigit() else None
 
     def _resolve_cik(self, ticker: str) -> str | None:
         """Resolve ticker symbol to zero-padded 10-digit CIK."""
@@ -77,7 +97,76 @@ class EDGARLoader:
         form_type: str = "10-Q",
         limit: int = 3,
     ) -> list[dict]:
-        """Search EDGAR for recent filings of the given form type."""
+        """Return the company's own recent filings of the given form type.
+
+        The authoritative source is the SEC submissions JSON, which lists only
+        filings *made by* the company (with the correct filer CIK and exact
+        primary-document name). The EFTS full-text search is used only as a
+        fallback and is filtered to the company's own CIK, because a raw
+        ``q:"TICKER"`` search also returns filings by unrelated entities that
+        merely mention the ticker — those have a different filer CIK and cannot
+        be resolved against the company's archive path.
+        """
+        own = self._filings_from_submissions(ticker, form_type, limit)
+        if own:
+            return own
+        logger.info(
+            "No {} filings in submissions for {}; trying full-text search",
+            form_type,
+            ticker,
+        )
+        return self._filings_from_search(ticker, form_type, limit)
+
+    def _filings_from_submissions(
+        self,
+        ticker: str,
+        form_type: str,
+        limit: int,
+    ) -> list[dict]:
+        """Read the company's own recent filings from SEC submissions JSON."""
+        cik = self._resolve_cik(ticker)
+        if not cik:
+            return []
+        try:
+            url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+            response = self._get(url)
+            data = response.json()
+            recent = data.get("filings", {}).get("recent", {})
+            forms = recent.get("form", [])
+            accessions = recent.get("accessionNumber", [])
+            dates = recent.get("filingDate", [])
+            primary_docs = recent.get("primaryDocument", [])
+            results: list[dict] = []
+            for i, form in enumerate(forms):
+                if form != form_type:
+                    continue
+                results.append(
+                    {
+                        "accession_number": accessions[i],
+                        "date": dates[i],
+                        "form_type": form,
+                        "ticker": ticker.upper(),
+                        "cik": cik,
+                        "primary_document": (
+                            primary_docs[i] if i < len(primary_docs) else ""
+                        ),
+                    }
+                )
+                if len(results) >= limit:
+                    break
+            return results
+        except Exception as exc:
+            logger.error("Submissions lookup failed for {}: {}", ticker, exc)
+            return []
+
+    def _filings_from_search(
+        self,
+        ticker: str,
+        form_type: str,
+        limit: int,
+    ) -> list[dict]:
+        """Fallback: EFTS full-text search, restricted to the company's own CIK."""
+        resolved_cik = self._resolve_cik(ticker)
         try:
             end = datetime.utcnow().date()
             start = end - timedelta(days=365 * 3)
@@ -95,7 +184,7 @@ class EDGARLoader:
 
             filings: list[dict] = []
             hits = data.get("hits", {}).get("hits", [])
-            for hit in hits[: limit * 3]:
+            for hit in hits:
                 source = hit.get("_source", {})
                 accession = source.get("adsh") or source.get("accession_no", "")
                 if not accession:
@@ -104,60 +193,25 @@ class EDGARLoader:
                     accession = (
                         f"{accession[:10]}-{accession[10:12]}-{accession[12:]}"
                     )
+                filer_cik = self._cik_from_accession(accession)
+                # Skip filings by other entities that merely mention the ticker.
+                if resolved_cik and filer_cik and int(filer_cik) != int(resolved_cik):
+                    continue
                 filings.append(
                     {
                         "accession_number": accession,
                         "date": source.get("file_date", source.get("period_ending", "")),
                         "form_type": source.get("form", form_type),
                         "ticker": ticker.upper(),
+                        "cik": resolved_cik or filer_cik,
+                        "primary_document": "",
                     }
                 )
                 if len(filings) >= limit:
                     break
-
-            if filings:
-                return filings
-
-            return self._filings_from_submissions(ticker, form_type, limit)
+            return filings
         except Exception as exc:
-            logger.error("get_recent_filings search failed for {}: {}", ticker, exc)
-            return self._filings_from_submissions(ticker, form_type, limit)
-
-    def _filings_from_submissions(
-        self,
-        ticker: str,
-        form_type: str,
-        limit: int,
-    ) -> list[dict]:
-        """Fallback: read recent filings from SEC submissions JSON."""
-        cik = self._resolve_cik(ticker)
-        if not cik:
-            return []
-        try:
-            url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-            response = self._get(url)
-            data = response.json()
-            recent = data.get("filings", {}).get("recent", {})
-            forms = recent.get("form", [])
-            accessions = recent.get("accessionNumber", [])
-            dates = recent.get("filingDate", [])
-            results: list[dict] = []
-            for form, accession, date in zip(forms, accessions, dates):
-                if form != form_type:
-                    continue
-                results.append(
-                    {
-                        "accession_number": accession,
-                        "date": date,
-                        "form_type": form,
-                        "ticker": ticker.upper(),
-                    }
-                )
-                if len(results) >= limit:
-                    break
-            return results
-        except Exception as exc:
-            logger.error("Submissions fallback failed for {}: {}", ticker, exc)
+            logger.error("Full-text search failed for {}: {}", ticker, exc)
             return []
 
     def _filing_index_url(self, cik: str, accession_number: str) -> str:
@@ -224,21 +278,39 @@ class EDGARLoader:
         ticker: str,
         accession_number: str,
         filing_date: str | None = None,
+        cik: str | None = None,
+        primary_document: str | None = None,
     ) -> dict | None:
-        """Download primary filing document and return cleaned text."""
+        """Download primary filing document and return cleaned text.
+
+        ``cik`` must be the *filer* CIK for this accession (defaults to the CIK
+        embedded in the accession number, then the ticker's resolved CIK). When
+        ``primary_document`` is known (from the submissions JSON) the main
+        document URL is built directly, skipping the index.json heuristic.
+        """
         try:
-            cik = self._resolve_cik(ticker)
+            cik = (
+                cik
+                or self._cik_from_accession(accession_number)
+                or self._resolve_cik(ticker)
+            )
             if not cik:
                 logger.error("Could not resolve CIK for {}", ticker)
                 return None
 
-            index_url = self._filing_index_url(cik, accession_number)
-            response = self._get(index_url)
-            index_data = response.json()
-
-            base_url = index_url.replace("index.json", "")
-            items = index_data.get("directory", {}).get("item", [])
-            doc_url = self._select_primary_document(items, ticker, base_url)
+            cik_num = str(int(cik))
+            accession_nodash = accession_number.replace("-", "")
+            if primary_document:
+                doc_url = (
+                    f"https://www.sec.gov/Archives/edgar/data/{cik_num}/"
+                    f"{accession_nodash}/{primary_document}"
+                )
+            else:
+                index_url = self._filing_index_url(cik, accession_number)
+                index_data = self._get(index_url).json()
+                base_url = index_url.replace("index.json", "")
+                items = index_data.get("directory", {}).get("item", [])
+                doc_url = self._select_primary_document(items, ticker, base_url)
 
             if not doc_url:
                 logger.error("No primary document found for {}", accession_number)
@@ -282,6 +354,8 @@ class EDGARLoader:
                 ticker,
                 filing["accession_number"],
                 filing_date=filing.get("date"),
+                cik=filing.get("cik"),
+                primary_document=filing.get("primary_document"),
             )
             if loaded is not None:
                 documents.append(loaded)
