@@ -27,6 +27,7 @@ class PipelineState(TypedDict, total=False):
     original_query: str
     tickers: list[str]
     use_llm: bool
+    conversation_context: str
 
     # Per-stage outputs
     briefing: MacroBriefing | None

@@ -59,6 +59,10 @@ class RiskSummary(BaseModel):
     mean_realised_vol: float = 0.0
 
     per_asset: list[AssetVolMetrics] = Field(default_factory=list)
+    correlation_matrix: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Full pairwise return-correlation matrix keyed by ticker",
+    )
     correlation_warnings: list[CorrelationWarning] = Field(default_factory=list)
     concentration: ConcentrationRisk = Field(default_factory=ConcentrationRisk)
     position_sizing: list[PositionSizingConstraint] = Field(default_factory=list)

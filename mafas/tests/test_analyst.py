@@ -32,8 +32,10 @@ class FakeLLM:
     def __init__(self, response: dict | None = None, raise_error: bool = False) -> None:
         self._response = response or {}
         self._raise = raise_error
+        self.last_messages = []
 
     def chat_json(self, messages, options=None):
+        self.last_messages = messages
         if self._raise:
             from agents.llm import OllamaError
 
@@ -146,6 +148,23 @@ class TestAnalystAgent:
         for citation in briefing.citations:
             assert citation.excerpt
             assert citation.index >= 1
+
+    def test_conversation_context_is_bounded_and_separate_from_retrieval(
+        self, sample_hits
+    ) -> None:
+        llm = FakeLLM({"summary": "Follow-up answer [1]."})
+        retriever = FakeRetriever(sample_hits)
+        agent = AnalystAgent(retriever, llm)
+
+        agent.brief(
+            "What changed?",
+            conversation_context=("old context " * 1_000) + "LATEST TURN",
+        )
+
+        prompt = llm.last_messages[-1]["content"]
+        assert "<conversation_context>" in prompt
+        assert "LATEST TURN" in prompt
+        assert len(prompt) < 20_000
 
     def test_render_produces_report(self, sample_hits) -> None:
         agent = AnalystAgent(FakeRetriever(sample_hits), FakeLLM({"summary": "Hold."}))

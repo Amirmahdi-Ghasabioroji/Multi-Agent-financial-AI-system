@@ -2,9 +2,12 @@
 
 import argparse
 import os
+from collections.abc import Callable
+from typing import Any
 
 from dotenv import load_dotenv
 from loguru import logger
+from pydantic import BaseModel
 
 from data.loaders.edgar import EDGARLoader
 from data.loaders.fomc import FOMCLoader
@@ -15,6 +18,32 @@ from rag.retriever import VectorRetriever
 
 # Mega-cap watchlist for SEC filing ingestion.
 DEFAULT_TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "JPM"]
+
+
+class CorpusBuildResult(BaseModel):
+    """Structured corpus-refresh summary for CLIs and dashboard jobs."""
+
+    fomc_documents: int
+    sec_documents: int
+    news_documents: int
+    documents_ingested: int
+    chunks_created: int
+    vectors_in_collection: int
+    reset: bool = False
+
+
+def _emit(
+    callback: Callable[[str, dict[str, Any]], None] | None,
+    event: str,
+    **payload: Any,
+) -> None:
+    """Emit progress without allowing UI observers to break ingestion."""
+    if callback is None:
+        return
+    try:
+        callback(event, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Corpus progress callback failed ({})", type(exc).__name__)
 
 
 class CorpusBuilder:
@@ -54,7 +83,8 @@ def build_initial_corpus(
     tickers: list[str] | None = None,
     filings_per_ticker: int = 1,
     reset: bool = False,
-) -> None:
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+) -> CorpusBuildResult:
     """Load FOMC minutes, SEC filings, and news; ingest into Qdrant; print summary.
 
     Ingestion is idempotent: chunks use deterministic content-hash IDs, so
@@ -78,21 +108,47 @@ def build_initial_corpus(
     news_loader = NewsLoader()
 
     logger.info("Loading FOMC minutes (n={})...", n_fomc)
+    _emit(progress_callback, "stage_started", stage="fomc", requested=n_fomc)
     fomc_docs = fomc_loader.load_recent(n=n_fomc)
+    _emit(progress_callback, "stage_completed", stage="fomc", loaded=len(fomc_docs))
 
     logger.info("Loading SEC filings for {} tickers...", len(tickers))
+    _emit(progress_callback, "stage_started", stage="sec", tickers=tickers)
     sec_docs: list[dict] = []
     for ticker in tickers:
         docs = edgar_loader.load_recent_for_ticker(ticker, limit=filings_per_ticker)
         logger.info("  {}: {} filing(s)", ticker, len(docs))
         sec_docs.extend(docs)
+        _emit(
+            progress_callback,
+            "stage_progress",
+            stage="sec",
+            ticker=ticker,
+            loaded=len(docs),
+        )
+    _emit(progress_callback, "stage_completed", stage="sec", loaded=len(sec_docs))
 
     logger.info("Loading news articles...")
+    _emit(progress_callback, "stage_started", stage="news")
     news_docs = news_loader.load_all(max_per_feed=max_news_per_feed)
+    _emit(progress_callback, "stage_completed", stage="news", loaded=len(news_docs))
 
     all_documents = fomc_docs + sec_docs + news_docs
+    _emit(
+        progress_callback,
+        "stage_started",
+        stage="embedding",
+        documents=len(all_documents),
+    )
     total_chunks = corpus_builder.ingest_documents(all_documents)
     total_vectors = retriever.count()
+    _emit(
+        progress_callback,
+        "stage_completed",
+        stage="embedding",
+        chunks=total_chunks,
+        vectors=total_vectors,
+    )
 
     print(
         f"\nCorpus build complete:\n"
@@ -103,6 +159,17 @@ def build_initial_corpus(
         f"  Chunks created:     {total_chunks}\n"
         f"  Vectors in Qdrant:  {total_vectors}\n"
     )
+    result = CorpusBuildResult(
+        fomc_documents=len(fomc_docs),
+        sec_documents=len(sec_docs),
+        news_documents=len(news_docs),
+        documents_ingested=len(all_documents),
+        chunks_created=total_chunks,
+        vectors_in_collection=total_vectors,
+        reset=reset,
+    )
+    _emit(progress_callback, "corpus_completed", **result.model_dump())
+    return result
 
 
 if __name__ == "__main__":

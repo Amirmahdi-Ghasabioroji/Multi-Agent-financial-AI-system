@@ -26,6 +26,8 @@ fakes and no network / LLM / LangGraph runtime concerns leaking into the tests.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from loguru import logger
@@ -61,6 +63,7 @@ class RiskPipeline:
         analyst_confidence_threshold: float = ANALYST_CONFIDENCE_THRESHOLD,
         max_analyst_retries: int = MAX_ANALYST_RETRIES,
         setup_confidence_floor: float = SETUP_CONFIDENCE_FLOOR,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.analyst = analyst
         self.risk = risk
@@ -69,71 +72,127 @@ class RiskPipeline:
         self.analyst_confidence_threshold = analyst_confidence_threshold
         self.max_analyst_retries = max_analyst_retries
         self.setup_confidence_floor = setup_confidence_floor
+        self._progress_callback = progress_callback
         self._graph = self._build_graph()
+
+    def _emit(self, event: str, **payload: Any) -> None:
+        """Best-effort structured progress event for API/SSE adapters."""
+        if self._progress_callback is None:
+            return
+        try:
+            self._progress_callback(event, payload)
+        except Exception as exc:  # noqa: BLE001 - progress must never stop analysis
+            logger.warning("Progress callback failed ({}); continuing", type(exc).__name__)
 
     # ------------------------------- nodes ------------------------------- #
     def _analyst_node(self, state: PipelineState) -> PipelineState:
         attempts = state.get("analyst_attempts", 0) + 1
         query = state.get("query", "")
         log = state.get("route_log", []) + [f"analyst(attempt={attempts})"]
+        self._emit("stage_started", stage="analyst", attempt=attempts)
         try:
-            briefing = self.analyst.brief(query)
+            conversation_context = state.get("conversation_context", "")
+            if conversation_context:
+                briefing = self.analyst.brief(
+                    query, conversation_context=conversation_context
+                )
+            else:
+                briefing = self.analyst.brief(query)
         except Exception as exc:  # noqa: BLE001 - defensive: record and continue
             logger.error("Analyst node failed: {}", exc)
+            self._emit(
+                "stage_failed",
+                stage="analyst",
+                attempt=attempts,
+                error=type(exc).__name__,
+            )
             return {
                 "analyst_attempts": attempts,
                 "briefing": None,
                 "route_log": log,
                 "errors": state.get("errors", []) + [f"analyst: {type(exc).__name__}"],
             }
+        self._emit(
+            "stage_completed",
+            stage="analyst",
+            attempt=attempts,
+            confidence=briefing.confidence,
+            sources=len(briefing.citations),
+        )
         return {"analyst_attempts": attempts, "briefing": briefing, "route_log": log}
 
     def _broaden_node(self, state: PipelineState) -> PipelineState:
         current = state.get("query", "")
         log = state.get("route_log", []) + ["broaden"]
+        self._emit("stage_started", stage="broaden")
         broadened = self._broaden_query(current, state.get("use_llm", True))
         logger.info("Broadening query: '{}' -> '{}'", current, broadened)
+        self._emit(
+            "stage_completed",
+            stage="broaden",
+            original_query=current,
+            broadened_query=broadened,
+        )
         return {"query": broadened, "route_log": log}
 
     def _risk_node(self, state: PipelineState) -> PipelineState:
         log = state.get("route_log", []) + ["risk"]
+        self._emit("stage_started", stage="risk")
         try:
             summary = self.risk.assess(
                 universe=state.get("tickers", []), briefing=state.get("briefing")
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Risk node failed: {}", exc)
+            self._emit("stage_failed", stage="risk", error=type(exc).__name__)
             return {
                 "risk": None,
                 "route_log": log,
                 "errors": state.get("errors", []) + [f"risk: {type(exc).__name__}"],
             }
+        self._emit(
+            "stage_completed",
+            stage="risk",
+            regime=summary.vol_regime,
+            universe=summary.universe,
+        )
         return {"risk": summary, "route_log": log}
 
     def _strategy_node(self, state: PipelineState) -> PipelineState:
         log = state.get("route_log", []) + ["strategy"]
+        self._emit("stage_started", stage="strategy")
         risk = state.get("risk")
         if risk is None:
+            self._emit("stage_skipped", stage="strategy", reason="risk unavailable")
             return {"strategy": None, "route_log": log}
         try:
             report = self.strategy.decide(risk, briefing=state.get("briefing"))
         except Exception as exc:  # noqa: BLE001
             logger.error("Strategy node failed: {}", exc)
+            self._emit("stage_failed", stage="strategy", error=type(exc).__name__)
             return {
                 "strategy": None,
                 "route_log": log,
                 "errors": state.get("errors", []) + [f"strategy: {type(exc).__name__}"],
             }
+        self._emit(
+            "stage_completed",
+            stage="strategy",
+            setups=len(report.setups),
+            bias=report.macro_bias.direction,
+        )
         return {"strategy": report, "route_log": log}
 
     def _execution_node(self, state: PipelineState) -> PipelineState:
         log = state.get("route_log", []) + ["execution"]
         strategy = state.get("strategy")
         setups = strategy.setups if strategy else []
+        self._emit("stage_started", stage="execution", setups=len(setups))
         try:
             cards = self.execution.simulate_report(setups, risk=state.get("risk"))
         except Exception as exc:  # noqa: BLE001
             logger.error("Execution node failed: {}", exc)
+            self._emit("stage_failed", stage="execution", error=type(exc).__name__)
             return {
                 "cards": [],
                 "decision": "no_trade",
@@ -141,11 +200,18 @@ class RiskPipeline:
                 "route_log": log,
                 "errors": state.get("errors", []) + [f"execution: {type(exc).__name__}"],
             }
+        self._emit(
+            "stage_completed",
+            stage="execution",
+            cards=len(cards),
+            simulated=sum(1 for card in cards if card.simulated),
+        )
         return {"cards": cards, "decision": "trade", "route_log": log}
 
     def _no_trade_node(self, state: PipelineState) -> PipelineState:
         log = state.get("route_log", []) + ["no_trade"]
         reason = state.get("no_trade_reason", "") or self._no_trade_reason(state)
+        self._emit("no_trade", stage="no_trade", reason=reason)
         return {"decision": "no_trade", "no_trade_reason": reason, "cards": [], "route_log": log}
 
     # ----------------------------- routing ------------------------------- #
@@ -252,14 +318,24 @@ class RiskPipeline:
 
     # ------------------------------- run --------------------------------- #
     def run(
-        self, query: str, tickers: list[str] | None = None, use_llm: bool = True
+        self,
+        query: str,
+        tickers: list[str] | None = None,
+        use_llm: bool = True,
+        conversation_context: str | None = None,
+        progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> PipelineResult:
         """Execute the graph for a query and return the aggregated result."""
+        previous_callback = self._progress_callback
+        if progress_callback is not None:
+            self._progress_callback = progress_callback
+        self._emit("pipeline_started", query=query, tickers=tickers or [])
         initial: PipelineState = {
             "query": query,
             "original_query": query,
             "tickers": tickers or [],
             "use_llm": use_llm,
+            "conversation_context": (conversation_context or "")[-8_000:],
             "analyst_attempts": 0,
             "cards": [],
             "route_log": [],
@@ -267,21 +343,31 @@ class RiskPipeline:
             "decision": "",
         }
         # Allow enough steps for the bounded broaden loop plus the linear tail.
-        final = self._graph.invoke(initial, {"recursion_limit": 50})
-        return PipelineResult(
-            query=final.get("query", query),
-            original_query=final.get("original_query", query),
-            tickers=final.get("tickers", []),
-            decision=final.get("decision") or "no_trade",
-            no_trade_reason=final.get("no_trade_reason", ""),
-            briefing=final.get("briefing"),
-            risk=final.get("risk"),
-            strategy=final.get("strategy"),
-            cards=final.get("cards", []),
-            analyst_attempts=final.get("analyst_attempts", 0),
-            route_log=final.get("route_log", []),
-            errors=final.get("errors", []),
-        )
+        try:
+            final = self._graph.invoke(initial, {"recursion_limit": 50})
+            result = PipelineResult(
+                query=final.get("query", query),
+                original_query=final.get("original_query", query),
+                tickers=final.get("tickers", []),
+                decision=final.get("decision") or "no_trade",
+                no_trade_reason=final.get("no_trade_reason", ""),
+                briefing=final.get("briefing"),
+                risk=final.get("risk"),
+                strategy=final.get("strategy"),
+                cards=final.get("cards", []),
+                analyst_attempts=final.get("analyst_attempts", 0),
+                route_log=final.get("route_log", []),
+                errors=final.get("errors", []),
+            )
+            self._emit(
+                "pipeline_completed",
+                decision=result.decision,
+                route=result.route_log,
+                errors=result.errors,
+            )
+            return result
+        finally:
+            self._progress_callback = previous_callback
 
 
 def build_pipeline(with_llm: bool = True) -> RiskPipeline:

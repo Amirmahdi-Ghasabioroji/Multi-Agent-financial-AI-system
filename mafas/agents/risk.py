@@ -268,6 +268,14 @@ class RiskAgent:
 
         returns = {t: daily_returns(df["close"]) for t, df in frames.items()}
         corr = correlation_matrix(returns)
+        if not corr.empty:
+            summary.correlation_matrix = {
+                str(row): {
+                    str(column): round(float(value), 4)
+                    for column, value in values.items()
+                }
+                for row, values in corr.to_dict(orient="index").items()
+            }
         mean_corr = mean_pairwise_correlation(corr)
         n_assets = len(corr) if not corr.empty else len(frames)
 

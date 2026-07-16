@@ -184,3 +184,47 @@ def test_render_smoke():
     assert "MAFAS PIPELINE" in text
     assert "Route:" in text
     assert "Decision: TRADE" in text
+
+
+def test_progress_callback_reports_stages_and_completion():
+    events = []
+    p = _pipeline(
+        FakeAnalyst([0.8]),
+        FakeRisk(),
+        FakeStrategy([_setup(0.7)]),
+        FakeExecution(),
+    )
+    result = p.run(
+        "fed outlook",
+        use_llm=False,
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert result.decision == "trade"
+    names = [event for event, _ in events]
+    assert names[0] == "pipeline_started"
+    assert ("stage_started", {"stage": "analyst", "attempt": 1}) in events
+    assert names[-1] == "pipeline_completed"
+
+
+def test_conversation_context_is_forwarded_to_analyst():
+    class ContextAnalyst(FakeAnalyst):
+        def brief(
+            self,
+            query,
+            doc_type=None,
+            date_after=None,
+            conversation_context=None,
+        ):
+            self.context = conversation_context
+            return super().brief(query, doc_type=doc_type, date_after=date_after)
+
+    analyst = ContextAnalyst([0.8])
+    p = _pipeline(
+        analyst,
+        FakeRisk(),
+        FakeStrategy([_setup(0.7)]),
+        FakeExecution(),
+    )
+    p.run("What changed?", conversation_context="Earlier we discussed inflation.")
+    assert analyst.context == "Earlier we discussed inflation."
