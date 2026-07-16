@@ -142,6 +142,7 @@ function CitationCards({ citations }: { citations: Citation[] }) {
 function AnalystResult({ data }: { data: JsonRecord }) {
   if (!Object.keys(data).length) return null;
   const confidence = getValue(data, ["confidence", "overall_confidence", "score"]);
+  const summary = getValue(data, ["summary", "executive_summary", "overview"]);
   const breakdown = getValue(data, [
     "confidence_breakdown",
     "confidence_components",
@@ -189,6 +190,11 @@ function AnalystResult({ data }: { data: JsonRecord }) {
             ) : null
           }
         />
+        {summary !== undefined && (
+          <p className="muted" style={{ lineHeight: 1.65, marginBottom: 16 }}>
+            {String(summary)}
+          </p>
+        )}
         <BarList values={numericEntries(breakdown)} />
       </section>
       {(points.length > 0 || risks.length > 0) && (

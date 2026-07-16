@@ -87,7 +87,7 @@ class Settings:
     health_timeout_seconds: float = 1.5
     qdrant_url: str = "http://qdrant:6333"
     qdrant_collection: str = "financial_docs"
-    ollama_url: str = "http://ollama:11434"
+    ollama_url: str = "http://host.docker.internal:11434"
     fred_configured: bool = False
     twelve_data_configured: bool = False
     edgar_configured: bool = False
@@ -112,7 +112,7 @@ class Settings:
             ),
             qdrant_url=os.getenv("QDRANT_URL", "http://qdrant:6333").rstrip("/"),
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "financial_docs"),
-            ollama_url=os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
+            ollama_url=os.getenv("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/"),
             fred_configured=bool(os.getenv("FRED_API_KEY", "").strip()),
             twelve_data_configured=bool(
                 os.getenv("TWELVE_DATA_API_KEY", "").strip()

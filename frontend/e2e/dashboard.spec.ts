@@ -130,9 +130,12 @@ test("runs the demo pipeline and renders all agent results", async ({ page }) =>
   await page.getByLabel("Research query").fill("Fed outlook");
   await page.getByRole("button", { name: "Start full pipeline" }).click();
 
-  await expect(page.getByText("Inflation is moderating while policy remains restrictive [1].")).toBeVisible();
+  await expect(page.getByText("Live run monitor")).toBeVisible();
+  await expect(page.getByText("Disinflation remains visible [1].")).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByText("Correlation matrix")).toBeVisible();
-  await expect(page.getAllByText("Trend Following").first()).toBeVisible();
+  await expect(page.getByText("Trend Following").first()).toBeVisible();
   await expect(page.getByText("Positive simulated expectancy.")).toBeVisible();
 });
 

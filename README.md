@@ -219,4 +219,20 @@ All four agents + the LangGraph orchestration layer are implemented, tested
 (101 passing core unit tests), and verified end-to-end live. Dashboard/API and
 browser tests live in `backend/tests/` and `frontend/`.
 
+```powershell
+# Core agent suite + FastAPI API tests
+.\mafas\.venv\Scripts\python -m pytest mafas\tests backend\tests -q
+
+# Frontend unit/lint/typecheck inside a Node container
+docker build --target test -t mafas-frontend-test ./frontend
+
+# Browser smoke against a running frontend (API mocked)
+docker run --rm -p 127.0.0.1:3000:3000 -d --name mafas-frontend-e2e mafas-frontend:local
+docker run --rm --add-host=host.docker.internal:host-gateway `
+  -e PLAYWRIGHT_BASE_URL=http://host.docker.internal:3000 `
+  -v "${PWD}/frontend:/app" -w /app `
+  mcr.microsoft.com/playwright:v1.61.1-noble npx playwright test
+docker stop mafas-frontend-e2e
+```
+
 See `PROJECT_OVERVIEW.md` for a full architecture and implementation reference.
