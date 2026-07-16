@@ -1,12 +1,14 @@
 """
-Smoke-test the end-to-end Analyst -> Risk -> Strategy pipeline (live + Ollama).
+Smoke-test the full Analyst -> Risk -> Strategy -> Execution pipeline (live).
 
-This exercises the full Phase-1 flow:
+This exercises the full flow:
     1. Analyst Agent runs RAG over Qdrant + Ollama to produce a MacroBriefing.
     2. Risk Agent consumes that briefing, pulls live market data via yfinance,
        computes deterministic risk metrics, and adds an Ollama narrative.
     3. Strategy Agent consumes both, scores the playbooks, and reasons over the
        top candidates to produce instrument-bound setup suggestions.
+    4. Execution Agent simulates each setup against historical data (Twelve Data
+       with yfinance fallback) and produces TradeCards.
 
 Prerequisites (run from anywhere after: cd mafas && pip install -e .):
     * Qdrant running and the corpus ingested   (docker compose up -d)
@@ -177,6 +179,38 @@ def run_strategy(briefing, summary, use_llm: bool):
         return None
 
 
+def run_execution(report, summary, use_llm: bool):
+    """Simulate each strategy setup into a TradeCard."""
+    print("\n--- Execution Agent (historical simulation -> trade cards) ---")
+    if report is None or not report.setups:
+        fail("simulate", "no strategy setups available from prior stage")
+        return None
+    try:
+        from agents.execution import build_execution_agent
+
+        agent = build_execution_agent(with_llm=use_llm)
+        src = "twelvedata" if agent.twelvedata and agent.twelvedata.is_configured() else "yfinance (no TD key)"
+        ok("data_source", src)
+
+        cards = agent.simulate_report(report.setups, risk=summary)
+        simulated = [c for c in cards if c.simulated]
+        ok("cards", f"{len(cards)} card(s), {len(simulated)} simulated")
+        for c in cards:
+            inst = c.instrument or "—"
+            if c.simulated:
+                ok("  card", f"{c.strategy_name} | {inst} {c.direction.upper()} | "
+                             f"P(TP<SL)={c.stats.prob_tp_before_sl:.0%} | "
+                             f"E[R]={c.stats.expected_r:+.2f} | "
+                             f"E[P/L]=${c.expectancy_amount:+,.0f}")
+            else:
+                warn("  card", f"{c.strategy_name} | {inst} — {c.skip_reason[:50]}")
+        # Pipeline stage passes if at least one setup was actually simulated.
+        return cards if simulated else None
+    except Exception as exc:
+        fail("ExecutionAgent", f"{type(exc).__name__}: {exc}")
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="MAFAS end-to-end Analyst -> Risk pipeline smoke test."
@@ -211,6 +245,7 @@ def main() -> int:
     briefing = run_analyst(args.query, use_llm)
     summary = run_risk(briefing, args.tickers, args.lookback, use_llm)
     report = run_strategy(briefing, summary, use_llm)
+    cards = run_execution(report, summary, use_llm)
 
     if args.show_reports:
         if briefing is not None:
@@ -219,18 +254,22 @@ def main() -> int:
             print("\n" + summary.render())
         if report is not None:
             print("\n" + report.render())
+        for c in cards or []:
+            print("\n" + c.render())
 
     # The pipeline "passes" if each stage produced a usable object; the Analyst
     # may legitimately return an empty briefing if the corpus is bare.
     analyst_ok = briefing is not None
     risk_ok = summary is not None and bool(summary.per_asset)
     strategy_ok = report is not None and bool(report.setups)
-    passed = int(analyst_ok) + int(risk_ok) + int(strategy_ok)
-    print(f"\n=== Result: {passed}/3 stages passed "
+    execution_ok = cards is not None and any(c.simulated for c in cards)
+    passed = int(analyst_ok) + int(risk_ok) + int(strategy_ok) + int(execution_ok)
+    print(f"\n=== Result: {passed}/4 stages passed "
           f"(analyst={'ok' if analyst_ok else 'fail'}, "
           f"risk={'ok' if risk_ok else 'fail'}, "
-          f"strategy={'ok' if strategy_ok else 'fail'}) ===\n")
-    return 0 if passed == 3 else 1
+          f"strategy={'ok' if strategy_ok else 'fail'}, "
+          f"execution={'ok' if execution_ok else 'fail'}) ===\n")
+    return 0 if passed == 4 else 1
 
 
 if __name__ == "__main__":
