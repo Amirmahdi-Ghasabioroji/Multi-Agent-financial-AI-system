@@ -6,6 +6,7 @@ import pandas as pd
 import yfinance as yf
 from fredapi import Fred
 from loguru import logger
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class MarketDataLoader:
@@ -17,11 +18,19 @@ class MarketDataLoader:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.fred = Fred(api_key=fred_api_key)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8), reraise=True)
+    def _download_ohlcv(self, ticker: str, days: int) -> pd.DataFrame:
+        """Fetch raw OHLCV from yfinance, retrying on transient empty results."""
+        df = yf.download(ticker, period=f"{days}d", progress=False)
+        if df is None or df.empty:
+            # An empty frame is usually a transient rate-limit / network blip;
+            # raising lets tenacity retry with backoff before we give up.
+            raise ValueError(f"No OHLCV data returned for ticker '{ticker}'")
+        return df
+
     def get_ohlcv(self, ticker: str, days: int = 252) -> pd.DataFrame:
         """Download OHLCV history for a ticker."""
-        df = yf.download(ticker, period=f"{days}d", progress=False)
-        if df.empty:
-            raise ValueError(f"No OHLCV data returned for ticker '{ticker}'")
+        df = self._download_ohlcv(ticker, days)
         # yfinance returns MultiIndex columns (field, ticker); flatten to the
         # field level BEFORE lowercasing so 'Close' -> 'close' resolves cleanly.
         if isinstance(df.columns, pd.MultiIndex):

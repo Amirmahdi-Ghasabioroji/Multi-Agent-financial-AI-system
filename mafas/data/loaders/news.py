@@ -3,16 +3,26 @@
 import httpx
 import feedparser
 from loguru import logger
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from data.processors.cleaner import TextCleaner
 from data.processors.metadata import MetadataExtractor
 
-# Reuters discontinued feeds.reuters.com (DNS no longer resolves).
+# Multiple independent finance feeds provide redundancy: a single feed timing
+# out or going offline (Reuters discontinued feeds.reuters.com) no longer
+# starves the corpus of news. Each feed is fetched in isolation.
 RSS_FEEDS = [
     "https://feeds.bbci.co.uk/news/business/rss.xml",
     "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
     "https://www.marketwatch.com/rss/topstories",
+    "https://finance.yahoo.com/news/rssindex",
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    "https://www.cnbc.com/id/20910258/device/rss/rss.html",
 ]
 
 USER_AGENT = "Mozilla/5.0 (compatible; MAFAS/1.0; +https://github.com/mafas-project)"
@@ -25,11 +35,16 @@ class NewsLoader:
         self.cleaner = TextCleaner()
         self.metadata_extractor = MetadataExtractor()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=8))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=1, max=8),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.TimeoutException)),
+        reraise=True,
+    )
     def _fetch_rss_xml(self, url: str) -> str:
         """Download raw RSS XML via httpx (feedparser's urllib fails on some networks)."""
         with httpx.Client(
-            timeout=20.0,
+            timeout=30.0,
             headers={"User-Agent": USER_AGENT},
             follow_redirects=True,
         ) as client:
