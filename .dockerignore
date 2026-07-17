@@ -1,0 +1,20 @@
+# Backend image build context (repository root).
+.git
+.gitignore
+.cursor
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.db
+.env
+.env.*
+!.env.example
+**/.venv
+mafas/data/cache/*
+node_modules
+frontend
+backend/tests
+mafas/tests
+agent-transcripts
