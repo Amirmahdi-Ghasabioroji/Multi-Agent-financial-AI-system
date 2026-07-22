@@ -436,7 +436,6 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
               </div>
           </div>
         </div>
-      </div>
     </>
   );
 }
