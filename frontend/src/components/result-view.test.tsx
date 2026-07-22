@@ -75,9 +75,42 @@ describe("ResultView", () => {
                 mae_p95_r: 0.95,
               },
               sizing: { notional_pct: 0.2 },
+              backtest: {
+                period_start: "2024-01-01",
+                period_end: "2026-01-01",
+                metrics: {
+                  n_trades: 18,
+                  total_pnl: 5200,
+                  max_drawdown_pct: 0.05,
+                  sharpe_ratio: 1.1,
+                  sortino_ratio: 1.3,
+                  calmar_ratio: 1.0,
+                  profit_factor: 1.4,
+                  win_rate: 0.56,
+                  low_sample: false,
+                },
+                equity_curve: [100000, 101000, 102500, 101800, 103200, 105200],
+                drawdown_curve: [0, 0, 0, 0.007, 0, 0],
+                trades: [],
+              },
               verdict: "Positive simulated expectancy.",
             },
           ],
+          execution_comparison: {
+            ranked: [
+              {
+                rank: 1,
+                instrument: "AAPL",
+                strategy: "Trend Following",
+                composite_score: 0.78,
+                sharpe_ratio: 1.1,
+                total_pnl: 5200,
+                max_drawdown_pct: 0.05,
+                expected_r_forward: 0.4,
+              },
+            ],
+            best_sharpe: "Trend Following | AAPL",
+          },
         }}
       />,
     );
@@ -86,6 +119,8 @@ describe("ResultView", () => {
     expect(screen.getByText("Medium")).toBeInTheDocument();
     expect(screen.getByText("Trend Following · AAPL · LONG")).toBeInTheDocument();
     expect(screen.getByText(/Positive simulated expectancy/)).toBeInTheDocument();
+    expect(screen.getByText("Strategy comparison")).toBeInTheDocument();
+    expect(screen.getByText("Playbook signal replay")).toBeInTheDocument();
   });
 
   it("labels multiple execution trade cards", () => {

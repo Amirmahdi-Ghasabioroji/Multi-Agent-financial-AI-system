@@ -22,6 +22,8 @@ import {
   Network,
   ShieldAlert,
   Target,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 
 function numericEntries(value: unknown) {
@@ -536,6 +538,225 @@ function executionCardTitle(
   return parts.length ? parts.join(" · ") : `Trade card ${index + 1}`;
 }
 
+function Sparkline({
+  values,
+  tone = "teal",
+  label,
+}: {
+  values: number[];
+  tone?: "teal" | "amber" | "red";
+  label: string;
+}) {
+  if (!values.length) return null;
+  const width = 320;
+  const height = 72;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values
+    .map((value, index) => {
+      const x = (index / Math.max(values.length - 1, 1)) * width;
+      const y = height - ((value - min) / range) * (height - 8) - 4;
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <div className="sparkline-block">
+      <span className="sparkline-label">{label}</span>
+      <svg
+        className={`sparkline sparkline-${tone}`}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={label}
+      >
+        <polyline fill="none" strokeWidth="2" points={points} />
+      </svg>
+    </div>
+  );
+}
+
+function BacktestPanel({ backtest }: { backtest: JsonRecord }) {
+  const metrics = asRecord(backtest.metrics);
+  if (!Object.keys(metrics).length) return null;
+
+  const equity = Array.isArray(backtest.equity_curve)
+    ? backtest.equity_curve.map(Number).filter(Number.isFinite)
+    : [];
+  const drawdown = Array.isArray(backtest.drawdown_curve)
+    ? backtest.drawdown_curve.map(Number).filter(Number.isFinite)
+    : [];
+  const trades = Array.isArray(backtest.trades) ? backtest.trades.slice(-10) : [];
+  const robustness = asRecord(backtest.mc_robustness);
+
+  return (
+    <div className="backtest-panel" style={{ marginTop: 18 }}>
+      <SectionHeading
+        eyebrow="Historical backtest"
+        title="Playbook signal replay"
+        detail={
+          backtest.period_start && backtest.period_end
+            ? `${String(backtest.period_start)} → ${String(backtest.period_end)}`
+            : "Signal-driven trade history"
+        }
+      />
+      <div className="grid grid-4" style={{ marginTop: 12 }}>
+        <Metric
+          label="Total P/L"
+          value={`$${compactNumber(metrics.total_pnl)}`}
+          icon={TrendingUp}
+          tone={Number(metrics.total_pnl) >= 0 ? "teal" : "red"}
+        />
+        <Metric
+          label="Max drawdown"
+          value={percent(metrics.max_drawdown_pct)}
+          icon={TrendingDown}
+          tone="amber"
+        />
+        <Metric
+          label="Sharpe"
+          value={compactNumber(metrics.sharpe_ratio)}
+          icon={BarChart3}
+        />
+        <Metric
+          label="Win rate"
+          value={percent(metrics.win_rate)}
+          icon={Gauge}
+        />
+      </div>
+      <div className="grid grid-4" style={{ marginTop: 12 }}>
+        <Metric label="Sortino" value={compactNumber(metrics.sortino_ratio)} icon={BarChart3} />
+        <Metric label="Calmar" value={compactNumber(metrics.calmar_ratio)} icon={Crosshair} />
+        <Metric label="Profit factor" value={compactNumber(metrics.profit_factor)} icon={Target} />
+        <Metric label="Trades" value={String(metrics.n_trades ?? "—")} icon={Network} />
+      </div>
+      {(equity.length > 1 || drawdown.length > 1) && (
+        <div className="grid grid-2" style={{ marginTop: 16 }}>
+          {equity.length > 1 && <Sparkline values={equity} label="Equity curve" />}
+          {drawdown.length > 1 && (
+            <Sparkline values={drawdown} tone="amber" label="Drawdown" />
+          )}
+        </div>
+      )}
+      {Object.keys(robustness).length > 0 && (
+        <p className="muted" style={{ marginTop: 12 }}>
+          MC robustness (trade R): mean {compactNumber(robustness.expected_r_mean)} · p5{" "}
+          {compactNumber(robustness.expected_r_p5)} · p95{" "}
+          {compactNumber(robustness.expected_r_p95)}
+        </p>
+      )}
+      {metrics.low_sample && (
+        <p className="muted" style={{ marginTop: 8 }}>
+          Low sample size — interpret ratio metrics cautiously.
+        </p>
+      )}
+      {trades.length > 0 && (
+        <div className="trade-table-wrap" style={{ marginTop: 14 }}>
+          <h3>Recent trades</h3>
+          <table className="trade-table">
+            <thead>
+              <tr>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Outcome</th>
+                <th>P/L (R)</th>
+                <th>P/L ($)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((trade, index) => {
+                const row = asRecord(trade);
+                return (
+                  <tr key={`${row.entry_date}-${index}`}>
+                    <td>{shortDate(row.entry_date)}</td>
+                    <td>{shortDate(row.exit_date)}</td>
+                    <td>{String(row.outcome ?? "—").toUpperCase()}</td>
+                    <td>{compactNumber(row.pnl_r)}</td>
+                    <td>${compactNumber(row.pnl_amount)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionComparisonPanel({ comparison }: { comparison: JsonRecord }) {
+  const ranked = Array.isArray(comparison.ranked)
+    ? comparison.ranked.map(asRecord)
+    : [];
+  if (!ranked.length) return null;
+
+  return (
+    <section className="result-section execution-comparison">
+      <SectionHeading
+        eyebrow="Execution ranking"
+        title="Strategy comparison"
+        detail="Ranked by composite score (Sharpe, P/L, drawdown, forward R)"
+      />
+      <div className="comparison-highlights grid grid-3" style={{ marginBottom: 14 }}>
+        {comparison.best_sharpe && (
+          <div className="callout">
+            <BarChart3 size={18} />
+            <div>
+              <strong>Best Sharpe</strong>
+              <p>{String(comparison.best_sharpe)}</p>
+            </div>
+          </div>
+        )}
+        {comparison.best_pnl && (
+          <div className="callout">
+            <TrendingUp size={18} />
+            <div>
+              <strong>Best P/L</strong>
+              <p>{String(comparison.best_pnl)}</p>
+            </div>
+          </div>
+        )}
+        {comparison.lowest_drawdown && (
+          <div className="callout">
+            <TrendingDown size={18} />
+            <div>
+              <strong>Lowest drawdown</strong>
+              <p>{String(comparison.lowest_drawdown)}</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <table className="trade-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Strategy</th>
+            <th>Instrument</th>
+            <th>Score</th>
+            <th>Sharpe</th>
+            <th>P/L</th>
+            <th>Max DD</th>
+            <th>Fwd E[R]</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranked.map((row, index) => (
+            <tr key={`${row.strategy}-${row.instrument}-${index}`}>
+              <td>{row.rank ?? index + 1}</td>
+              <td>{String(row.strategy ?? "—")}</td>
+              <td>{String(row.instrument ?? "—")}</td>
+              <td>{compactNumber(row.composite_score)}</td>
+              <td>{compactNumber(row.sharpe_ratio)}</td>
+              <td>${compactNumber(row.total_pnl)}</td>
+              <td>{percent(row.max_drawdown_pct)}</td>
+              <td>{compactNumber(row.expected_r_forward)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function executionStatus(data: JsonRecord): {
   tone: "teal" | "amber" | "red";
   label: string;
@@ -572,6 +793,7 @@ function ExecutionResult({
   const levels = asRecord(data.levels);
   const stats = asRecord(data.stats);
   const sizing = asRecord(data.sizing);
+  const backtest = asRecord(data.backtest);
   const entry = getValue(
     { ...data, ...levels },
     ["entry", "entry_price", "suggested_entry"],
@@ -659,6 +881,7 @@ function ExecutionResult({
             </div>
           </div>
         )}
+        {Object.keys(backtest).length > 0 && <BacktestPanel backtest={backtest} />}
         {verdict && (
           <div className="execution-verdict">
             <strong>Verdict</strong>
@@ -776,6 +999,7 @@ export function ResultView({
     Object.keys(asRecord(root.aggregate)).length > 0
       ? { ...root, ...asRecord(root.aggregate) }
       : root;
+  const executionComparison = asRecord(root.execution_comparison);
 
   return (
     <div className="result-shell">
@@ -797,6 +1021,9 @@ export function ResultView({
       <AnalystResult data={analyst} />
       <RiskResult data={risk} />
       <StrategyResult data={strategy} />
+      {Object.keys(executionComparison).length > 0 && (
+        <ExecutionComparisonPanel comparison={executionComparison} />
+      )}
       {executionCards.length > 0 ? (
         executionCards.map((card, index) => (
           <ExecutionResult

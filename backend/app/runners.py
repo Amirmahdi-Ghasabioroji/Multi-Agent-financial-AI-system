@@ -199,6 +199,55 @@ def _demo_fixture(payload: dict[str, Any]) -> dict[str, Any]:
             "capped": False,
         },
         "expectancy_amount": 419.83,
+        "backtest": {
+            "period_start": "2024-01-15",
+            "period_end": "2026-03-01",
+            "metrics": {
+                "n_trades": 24,
+                "win_rate": 0.58,
+                "profit_factor": 1.65,
+                "expectancy_r": 0.31,
+                "total_pnl": 8420.0,
+                "total_return_pct": 0.0842,
+                "max_drawdown_pct": 0.062,
+                "max_drawdown_amount": 6200.0,
+                "sharpe_ratio": 1.24,
+                "sortino_ratio": 1.58,
+                "calmar_ratio": 1.36,
+                "avg_win_r": 1.12,
+                "avg_loss_r": -0.78,
+                "avg_bars_held": 8.5,
+                "low_sample": False,
+            },
+            "trades": [
+                {
+                    "entry_date": "2025-11-03",
+                    "exit_date": "2025-11-12",
+                    "direction": "long",
+                    "entry_price": 178.2,
+                    "exit_price": 186.4,
+                    "outcome": "tp",
+                    "pnl_r": 1.8,
+                    "pnl_amount": 720.0,
+                    "bars_held": 7,
+                }
+            ],
+            "equity_curve": [
+                100000, 100420, 100880, 101120, 101540, 101980, 102420, 102180,
+                102640, 103120, 103580, 103240, 103720, 104180, 104620, 105080,
+                104840, 105320, 105760, 106220, 105980, 106420, 106880, 107340,
+                108420,
+            ],
+            "drawdown_curve": [
+                0, 0, 0, 0, 0, 0, 0, 0.002, 0, 0, 0, 0.003, 0, 0, 0, 0,
+                0.002, 0, 0, 0, 0.001, 0, 0, 0, 0,
+            ],
+            "mc_robustness": {
+                "expected_r_mean": 7.2,
+                "expected_r_p5": 4.1,
+                "expected_r_p95": 10.8,
+            },
+        },
         "data_source": "demo",
         "bars_used": 504,
         "strategy_confidence": 0.74,
@@ -219,6 +268,23 @@ def _demo_fixture(payload: dict[str, Any]) -> dict[str, Any]:
         "risk": risk,
         "strategy": strategy,
         "cards": [card],
+        "execution_comparison": {
+            "ranked": [
+                {
+                    "rank": 1,
+                    "instrument": primary,
+                    "strategy": "Trend Following",
+                    "composite_score": 0.82,
+                    "sharpe_ratio": 1.24,
+                    "total_pnl": 8420.0,
+                    "max_drawdown_pct": 0.062,
+                    "expected_r_forward": 0.42,
+                }
+            ],
+            "best_sharpe": f"Trend Following | {primary}",
+            "best_pnl": f"Trend Following | {primary}",
+            "lowest_drawdown": f"Trend Following | {primary}",
+        },
         "analyst_attempts": 1,
         "route_log": ["analyst(attempt=1)", "risk", "strategy", "execution"],
         "errors": [],
@@ -343,7 +409,11 @@ def _execution_runner(payload: dict[str, Any], emit: EventEmitter) -> Any:
     risk_data = payload.get("risk")
     risk = RiskSummary.model_validate(risk_data) if risk_data else None
     emit("progress", "Simulating strategy setups", {"stage": "execution"})
-    return {"cards": json_safe(agent.simulate_report(setups, risk=risk))}
+    cards, comparison = agent.simulate_report(setups, risk=risk)
+    return {
+        "cards": json_safe(cards),
+        "execution_comparison": json_safe(comparison) if comparison else None,
+    }
 
 
 def _corpus_runner(

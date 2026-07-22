@@ -1510,3 +1510,67 @@ h3 {
     box-shadow: none;
   }
 }
+
+.sparkline-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sparkline-label {
+  font-size: 0.72rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sparkline {
+  width: 100%;
+  height: 72px;
+  background: #101a27;
+  border: 1px solid #1f2f42;
+  border-radius: 10px;
+  padding: 6px;
+}
+
+.sparkline-teal polyline {
+  stroke: var(--teal);
+}
+
+.sparkline-amber polyline {
+  stroke: var(--amber);
+}
+
+.sparkline-red polyline {
+  stroke: var(--red);
+}
+
+.trade-table-wrap h3 {
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+
+.trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.trade-table th,
+.trade-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1f2f42;
+  text-align: left;
+}
+
+.trade-table th {
+  color: var(--faint);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.68rem;
+}
+
+.execution-comparison .comparison-highlights .callout {
+  margin: 0;
+}
