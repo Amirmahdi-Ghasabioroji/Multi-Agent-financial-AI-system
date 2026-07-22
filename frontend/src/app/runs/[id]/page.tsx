@@ -44,7 +44,7 @@ export default function RunPage() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const kind = (job?.kind ?? job.agent ?? "pipeline") as RunKind;
+  const kind = (job?.kind ?? job?.agent ?? "pipeline") as RunKind;
   const sourceQuery = job ? jobQuery(job) : "";
   const sourceTickers = job ? jobTickers(job) : [];
   const terminal = job ? TERMINAL.has(job.status) : false;

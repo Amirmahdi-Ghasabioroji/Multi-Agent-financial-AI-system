@@ -644,7 +644,7 @@ function BacktestPanel({ backtest }: { backtest: JsonRecord }) {
           {compactNumber(robustness.expected_r_p95)}
         </p>
       )}
-      {metrics.low_sample && (
+      {metrics.low_sample === true && (
         <p className="muted" style={{ marginTop: 8 }}>
           Low sample size — interpret ratio metrics cautiously.
         </p>
@@ -667,8 +667,8 @@ function BacktestPanel({ backtest }: { backtest: JsonRecord }) {
                 const row = asRecord(trade);
                 return (
                   <tr key={`${row.entry_date}-${index}`}>
-                    <td>{shortDate(row.entry_date)}</td>
-                    <td>{shortDate(row.exit_date)}</td>
+                    <td>{shortDate(typeof row.entry_date === "string" ? row.entry_date : undefined)}</td>
+                    <td>{shortDate(typeof row.exit_date === "string" ? row.exit_date : undefined)}</td>
                     <td>{String(row.outcome ?? "—").toUpperCase()}</td>
                     <td>{compactNumber(row.pnl_r)}</td>
                     <td>${compactNumber(row.pnl_amount)}</td>
@@ -697,7 +697,7 @@ function ExecutionComparisonPanel({ comparison }: { comparison: JsonRecord }) {
         detail="Ranked by composite score (Sharpe, P/L, drawdown, forward R)"
       />
       <div className="comparison-highlights grid grid-3" style={{ marginBottom: 14 }}>
-        {comparison.best_sharpe && (
+        {comparison.best_sharpe != null && String(comparison.best_sharpe) !== "" && (
           <div className="callout">
             <BarChart3 size={18} />
             <div>
@@ -706,7 +706,7 @@ function ExecutionComparisonPanel({ comparison }: { comparison: JsonRecord }) {
             </div>
           </div>
         )}
-        {comparison.best_pnl && (
+        {comparison.best_pnl != null && String(comparison.best_pnl) !== "" && (
           <div className="callout">
             <TrendingUp size={18} />
             <div>
@@ -715,7 +715,7 @@ function ExecutionComparisonPanel({ comparison }: { comparison: JsonRecord }) {
             </div>
           </div>
         )}
-        {comparison.lowest_drawdown && (
+        {comparison.lowest_drawdown != null && String(comparison.lowest_drawdown) !== "" && (
           <div className="callout">
             <TrendingDown size={18} />
             <div>
@@ -741,7 +741,7 @@ function ExecutionComparisonPanel({ comparison }: { comparison: JsonRecord }) {
         <tbody>
           {ranked.map((row, index) => (
             <tr key={`${row.strategy}-${row.instrument}-${index}`}>
-              <td>{row.rank ?? index + 1}</td>
+              <td>{String(row.rank ?? index + 1)}</td>
               <td>{String(row.strategy ?? "—")}</td>
               <td>{String(row.instrument ?? "—")}</td>
               <td>{compactNumber(row.composite_score)}</td>
@@ -882,7 +882,7 @@ function ExecutionResult({
           </div>
         )}
         {Object.keys(backtest).length > 0 && <BacktestPanel backtest={backtest} />}
-        {verdict && (
+        {verdict != null && String(verdict) !== "" && (
           <div className="execution-verdict">
             <strong>Verdict</strong>
             <p>{String(verdict)}</p>
