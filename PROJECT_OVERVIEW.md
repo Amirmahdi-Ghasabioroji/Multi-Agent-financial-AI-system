@@ -3,10 +3,11 @@
 > Purpose of this file: a single, comprehensive reference so a new session (or a
 > new engineer) can understand the entire project quickly. It documents the
 > architecture, every module, key design decisions, conventions, gotchas, and how
-> to run/test everything. Keep it updated as the project evolves.
+> to run/test everything. **Keep it updated as the project evolves.**
 
-Last updated: covers all four agents, LangGraph orchestration, and the full
-Next.js/FastAPI/MySQL dashboard.
+Last updated: **July 2026** — covers all four agents, the **historical backtest +
+forward Monte Carlo simulation stack**, LangGraph orchestration, cross-strategy
+ranking, and the full Next.js/FastAPI/MySQL dashboard.
 
 ---
 
@@ -14,39 +15,105 @@ Next.js/FastAPI/MySQL dashboard.
 
 **Multi-Agent Financial AI System (MAFAS)** — a portfolio/interview project that
 chains four specialised agents behind a LangGraph orchestrator to go from a macro
-question to simulated trade ideas, entirely on free/local infrastructure.
+question to **researched and stress-tested** trade ideas, entirely on
+free/local infrastructure.
 
-Pipeline:
+### End-to-end pipeline
 
 ```
 User query
-  → Analyst Agent   → MacroBriefing   (RAG over Qdrant + Ollama, sourced + confidence-scored)
-  → Risk Agent      → RiskSummary     (live yfinance metrics: vol regime, correlations, sizing)
-  → Strategy Agent  → StrategyReport  (deterministic playbook scoring + LLM reasoning → setups)
-  → Execution Agent → TradeCard[]     (Monte Carlo simulation of each setup vs history)
-  → Orchestrator    → PipelineResult  (LangGraph graph: broaden-retry loop + no-trade gate)
+  → Analyst Agent   → MacroBriefing      (RAG over Qdrant + Ollama, sourced + confidence-scored)
+  → Risk Agent      → RiskSummary        (live yfinance metrics: vol regime, correlations, sizing)
+  → Strategy Agent  → StrategyReport     (deterministic playbook scoring + LLM → 2–3 setups)
+  → Execution Agent → TradeCard[]          (historical backtest + forward MC + sizing + verdict)
+                      ExecutionComparison  (ranked summary across the top setups)
+  → Orchestrator    → PipelineResult       (LangGraph: broaden-retry loop + no-trade gate)
 ```
 
-Design philosophy across all agents: **hybrid** — deterministic, testable logic
-is the source of truth; a local Ollama LLM (Mistral 7B) adds a natural-language
-layer and **always degrades gracefully** to a deterministic fallback if the LLM
-is unavailable. No paid APIs anywhere.
+### Execution Agent — two simulation layers (read this carefully)
+
+The Execution Agent is **not** a broker. It stress-tests each `StrategySetup`
+from the Strategy Agent using **two complementary engines**:
+
+| Layer | Module | Question it answers |
+|-------|--------|-------------------|
+| **Historical backtest** | `agents/simulation/historical.py` | “How would this playbook’s signals have performed on past bars?” |
+| **Forward Monte Carlo** | `agents/simulation/barrier.py` | “From today’s entry, what is P(TP before SL) if history repeats randomly?” |
+
+Per setup, `ExecutionAgent.simulate()`:
+
+1. Loads OHLCV (Twelve Data → yfinance fallback; pairs load two tickers).
+2. Runs a **playbook-driven historical backtest** → `TradeCard.backtest`.
+3. Computes **current ATR bracket levels** from the latest bar.
+4. Runs **bootstrap forward barrier MC** → `TradeCard.stats`.
+5. Sizes the position from Risk Agent constraints → `TradeCard.sizing`.
+6. Adds an LLM (or fallback) **verdict**.
+
+`simulate_report()` returns `(cards, execution_comparison)` where
+`execution_comparison` ranks all simulated cards by a transparent composite score
+(Sharpe, P/L, drawdown, forward expected R).
+
+### Design philosophy
+
+**Hybrid** across all agents: deterministic, testable logic is the source of
+truth; a local Ollama LLM (Mistral 7B) adds natural-language layers and **always
+degrades gracefully** when unavailable. No paid LLM APIs. Optional Twelve Data key
+for execution history only.
 
 ---
 
 ## 2. Environment & hard-won gotchas
 
-- **OS**: Windows, PowerShell. Repo root: `d:\QMUL\Summer project\Multi-Agent-financial-AI-system`. Code lives under `mafas/`.
-- **ALWAYS use the venv interpreter**: `.\.venv\Scripts\python` (the venv is Python 3.10, torch 2.12, transformers 5.9, sentence-transformers 5.5). The **global** Python is broken/incomplete (old torch, missing deps) — running bare `python` causes `ModuleNotFoundError` and torch import errors. This has bitten us before.
-- **Imports**: `from data...`, `from rag...`, `from agents...`. Run `pip install -e .` from `mafas/` (editable install via `pyproject.toml`, which includes `data*`, `rag*`, `agents*`). Or `cd mafas` + `$env:PYTHONPATH="."`. Never run module files by path; use `python -m package.module`.
-- Run **agent CLIs/tests** from `mafas/`; run the **full dashboard Compose
-  stack** from the repository root.
-- Qdrant needs no account. The legacy `mafas/docker-compose.yml` runs Qdrant
-  alone; the root Compose stack runs it with the dashboard and reuses the same
-  named volume. Do not run both Compose projects simultaneously because they
-  bind the same ports. Healthcheck uses `/readyz` (not `/health`).
-- Ollama: `ollama pull mistral` + `ollama serve` → `http://localhost:11434`. Free, local.
-- HF Hub warning about `HF_TOKEN` on embedder load is harmless (anonymous model download for `all-MiniLM-L6-v2`).
+### Python interpreter — use the venv
+
+- **OS**: Windows, PowerShell. Repo root:
+  `d:\QMUL\Summer project\Multi-Agent-financial-AI-system`. Agent code lives
+  under `mafas/`.
+- **ALWAYS use the project venv**: `mafas\.venv\Scripts\python` (or activate
+  first). The **global/system Python** on this machine is incomplete and has
+  caused `ModuleNotFoundError`, torch errors, and **NumPy/SciPy binary
+  mismatches** (`AttributeError: _ARRAY_API not found`).
+- After creating the venv:
+  ```powershell
+  cd mafas
+  python -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  pip install -e .
+  pip install -r requirements.txt
+  ```
+- `requirements.txt` pins `numpy==2.2.6` and requires **`scipy>=1.14.0`** and
+  **`scikit-learn>=1.5.0`** (NumPy 2–compatible wheels). If analyst tests fail
+  at import with SciPy errors, upgrade: `pip install "scipy>=1.14.0"`.
+
+### Imports & how to run modules
+
+- Package imports: `from agents...`, `from data...`, `from rag...`.
+- Editable install: `pip install -e .` from `mafas/` (`pyproject.toml` ships
+  `data*`, `rag*`, `agents*`).
+- Alternative: `cd mafas` + `$env:PYTHONPATH="."`.
+- **Never** run agent files by path; use `python -m agents.<module>`.
+- Run **agent CLIs/tests** from `mafas/`; run the **dashboard Compose stack**
+  from the repository root.
+
+### Lazy package imports (important for tests)
+
+`agents/__init__.py` uses **lazy `__getattr__` exports** so lightweight imports
+(e.g. `agents.execution_schemas`, `agents.simulation.*`) do **not** eagerly load
+the Analyst → sentence-transformers → scipy chain. Heavy modules (`analyst`,
+`orchestrator` graph build, `build_*_agent` factories) load only when accessed.
+
+Similarly, `execution.py`, `orchestrator.py`, `risk.py`, and `strategy.py`
+defer heavy third-party imports (`fredapi`, `langgraph`, data loaders) to
+factory functions or `run()` time where possible.
+
+### Infrastructure
+
+- **Qdrant**: no account needed. `mafas/docker-compose.yml` runs Qdrant alone;
+  root `docker-compose.yml` runs the full dashboard. **Do not run both** — same
+  ports. Healthcheck: `/readyz` (not `/health`).
+- **Ollama**: `ollama pull mistral` + `ollama serve` → `http://localhost:11434`.
+- **HF Hub** `HF_TOKEN` warning on embedder load is harmless (anonymous download
+  for `all-MiniLM-L6-v2`).
 
 ---
 
@@ -59,59 +126,75 @@ backend/
   Dockerfile
 frontend/
   src/app/              Next.js App Router pages
-  src/components/       shell, forms, timelines, agent result visualisations
+  src/components/       shell, forms, timelines, result-view (incl. backtest UI)
   src/lib/              typed API client, schemas/helpers
   Dockerfile
 docker-compose.yml      Full dashboard: frontend + backend + MySQL + Qdrant
 .env.example            Full-stack local configuration
+
 mafas/
   data/
     loaders/
-      fomc.py        FOMCLoader        — Fed minutes PDFs (federalreserve.gov allowlist)
-      edgar.py       EDGARLoader       — SEC 10-Q/10-K filings
-      news.py        NewsLoader        — BBC/CNBC/MarketWatch RSS
-      market.py      MarketDataLoader  — yfinance OHLCV/VIX + FRED (non-RAG)
-      twelvedata.py  TwelveDataLoader  — cached daily OHLCV for Execution
+      fomc.py           FOMCLoader        — Fed minutes PDFs (allowlisted host)
+      edgar.py          EDGARLoader       — SEC 10-Q/10-K filings
+      news.py           NewsLoader        — BBC/CNBC/MarketWatch RSS
+      market.py         MarketDataLoader  — yfinance OHLCV/VIX + FRED
+      twelvedata.py     TwelveDataLoader  — cached daily OHLCV for Execution
     processors/
-      cleaner.py     TextCleaner       — unicode/HTML/XML cleaning (defusedxml-guarded)
-      metadata.py    MetadataExtractor — DocumentMetadata + date normalisation
+      cleaner.py        TextCleaner
+      metadata.py       MetadataExtractor
   rag/
-    chunker.py       SemanticChunker
-    embedder.py      TextEmbedder      — sentence-transformers all-MiniLM-L6-v2 (dim=384)
-    retriever.py     VectorRetriever   — Qdrant wrapper, deterministic IDs, date_ts filter
-    corpus_builder.py                  — build_initial_corpus(); manual ingestion entry point
+    chunker.py          SemanticChunker
+    embedder.py         TextEmbedder (all-MiniLM-L6-v2, dim=384)
+    retriever.py        VectorRetriever (Qdrant, uuid5 IDs, date_ts filter)
+    corpus_builder.py   manual ingestion entry point
   agents/
-    llm.py           OllamaClient      — chat/chat_json, is_available(); OllamaError
-    schemas.py       MacroBriefing, KeyPoint, SourceCitation
-    confidence.py    composite_confidence(...) and components
-    analyst.py       AnalystAgent, build_analyst_agent()
-    risk_metrics.py  pure vol/ATR/correlation/sizing functions
-    risk_schemas.py  RiskSummary, AssetVolMetrics, CorrelationWarning, ConcentrationRisk, PositionSizingConstraint
-    risk.py          RiskAgent, build_risk_agent(), DEFAULT_WATCHLIST
-    strategy_playbooks.py  Playbook dataclass, PLAYBOOKS (8), score_playbook(), rank_playbooks()
-    strategy_schemas.py    MacroBias, PlaybookScore, StrategySetup, StrategyReport
-    strategy.py      StrategyAgent, build_strategy_agent()
-    backtest.py      simulate_barrier_bootstrap(), compute_position_size(), HORIZON_BARS
-    execution_schemas.py   TradeCard, TradeLevels, SimulationStats, SizingInfo
-    execution.py     ExecutionAgent, build_execution_agent()
-    pipeline_schemas.py    PipelineState (TypedDict), PipelineResult (Pydantic)
-    orchestrator.py  RiskPipeline (LangGraph StateGraph), build_pipeline()
-    __init__.py      exports all public classes/functions
+    llm.py              OllamaClient — chat/chat_json, is_available()
+    schemas.py          MacroBriefing, KeyPoint, SourceCitation
+    confidence.py       composite_confidence(...)
+    analyst.py          AnalystAgent, build_analyst_agent()
+    risk_metrics.py     pure vol/ATR/correlation/sizing maths
+    risk_schemas.py     RiskSummary, AssetVolMetrics, ...
+    risk.py             RiskAgent, build_risk_agent(), DEFAULT_WATCHLIST
+    strategy_playbooks.py   8 playbooks, score_playbook(), rank_playbooks()
+    strategy_schemas.py     MacroBias, PlaybookScore, StrategySetup, StrategyReport
+    strategy.py         StrategyAgent, build_strategy_agent()
+    simulation/         ★ backtest + forward MC engine (see §4)
+      barrier.py        simulate_barrier_bootstrap(), walk_forward_barrier()
+      historical.py     run_historical_backtest() — playbook signal replay
+      metrics.py        Sharpe, Sortino, Calmar, drawdown, profit factor, MC bands
+      levels.py         ATR bracket geometry at any bar
+      sizing.py         compute_position_size()
+      comparison.py     rank_trade_cards() → ExecutionComparison
+      signals/
+        base.py         SMA, RSI, ATR, spread z-score helpers
+        playbooks.py    8 playbook entry signal functions
+        registry.py     playbook key → signal, warmup_bars()
+    backtest.py         thin re-export shim (backward compat for old imports)
+    execution_schemas.py    TradeCard, BacktestResult, ExecutionComparison, ...
+    execution.py        ExecutionAgent, build_execution_agent()
+    pipeline_schemas.py PipelineState, PipelineResult (+ execution_comparison)
+    orchestrator.py   RiskPipeline (LangGraph), build_pipeline()
+    __init__.py         lazy public exports (do not add eager heavy imports)
   tests/
-    test_prerequisites.py  cleaner, chunker, metadata, embedder, dedup, date-normalisation
-    test_analyst.py        confidence + Analyst (mocked LLM/retriever)
-    test_risk.py           risk metrics + RiskAgent (synthetic data, mocked LLM)
-    test_strategy.py       playbook scoring, bias classify, StrategyAgent (mocked LLM)
-    test_execution.py      simulation, sizing, ExecutionAgent (synthetic data, mocked LLM)
-    test_orchestrator.py   LangGraph graph paths (fake agents)
-    conftest.py            shared fixtures
+    test_prerequisites.py
+    test_analyst.py
+    test_risk.py
+    test_strategy.py
+    test_execution.py
+    test_orchestrator.py
+    test_signals.py           ★ playbook signal unit tests
+    test_backtest_metrics.py  ★ performance metrics unit tests
+    test_historical_backtest.py ★ historical engine unit tests
+    test_corpus_dashboard.py
+    conftest.py
   scripts/
-    smoke_loaders.py       live loader checks
-    smoke_pipeline.py      live 4-stage end-to-end check (path-robust; adds repo root to sys.path)
-  docker-compose.yml       Qdrant service
-  pyproject.toml           editable install config (data*, rag*, agents*), pytest config
-  requirements.txt         pinned deps
-  .env.example             config template
+    smoke_loaders.py
+    smoke_pipeline.py       live 4-stage end-to-end check
+  docker-compose.yml        Qdrant only
+  pyproject.toml
+  requirements.txt
+  .env.example
 ```
 
 ---
@@ -119,66 +202,143 @@ mafas/
 ## 4. Agent-by-agent detail
 
 ### Analyst Agent (`agents/analyst.py`)
-- `brief(query, doc_type=None, date_after=None) -> MacroBriefing`. **Read-only** over Qdrant.
-- Retrieves top_k=8 (score_threshold 0.30), builds a numbered context with each source wrapped in `<source_data>` tags (prompt-injection hardening), asks Mistral for JSON, assembles a `MacroBriefing`.
-- **Composite confidence** (`confidence.py`): weighted mean of retrieval similarity (0.35), source diversity (0.25), recency (0.15), LLM self-report (0.25).
-- Empty/low-confidence briefing returned gracefully if no hits or LLM down.
+
+- `brief(query, ...) -> MacroBriefing`. **Read-only** over Qdrant.
+- Retrieves top_k=8 (score_threshold 0.30), builds numbered context with
+  `<source_data>` tags (prompt-injection hardening), asks Mistral for JSON.
+- **Composite confidence** (`confidence.py`): retrieval (0.35), diversity
+  (0.25), recency (0.15), LLM self-report (0.25).
+- Graceful empty briefing if no hits or LLM down.
 
 ### Risk Agent (`agents/risk.py`, `risk_metrics.py`, `risk_schemas.py`)
-- `assess(universe=None, briefing=None) -> RiskSummary`. Universe = `DEFAULT_WATCHLIST` (AAPL, MSFT, NVDA, AMZN, GOOGL, JPM) + caller tickers.
-- Deterministic metrics (source of truth): realised vol (annualised), Wilder ATR + ATR%, per-asset regime, VIX-blended overall regime, correlation matrix + warnings (|ρ|≥0.8), concentration (mean pairwise corr, effective number of bets = N/(1+(N-1)ρ̄), flagged if ρ̄≥0.5 or eff_bets < max(1.5, 0.4N)), inverse-vol position sizing scaled by regime & correlation, capped by max_position.
-- LLM adds narrative; deterministic fallback narrative otherwise.
-- Data: yfinance (`MarketDataLoader.get_ohlcv/get_vix`), fetched live each run.
+
+- `assess(universe=None, briefing=None) -> RiskSummary`.
+- Universe = `DEFAULT_WATCHLIST` (AAPL, MSFT, NVDA, AMZN, GOOGL, JPM) + caller
+  tickers.
+- Deterministic metrics: realised vol, Wilder ATR, per-asset regime, VIX-blended
+  market regime, correlation matrix + warnings (|ρ|≥0.8), concentration
+  diagnostics, inverse-vol position sizing capped by `max_position_pct`.
+- LLM narrative with deterministic fallback.
+- Data: yfinance via `MarketDataLoader` (live each run).
 
 ### Strategy Agent (`agents/strategy.py`, `strategy_playbooks.py`, `strategy_schemas.py`)
-- `decide(risk, briefing=None) -> StrategyReport`. Hybrid reasoning engine, NOT a signal generator.
-- Step 1: **macro bias** classification (bullish/bearish/neutral + strength) — LLM with keyword fallback.
-- Step 2: **deterministic playbook scoring** — `score = 0.45·regime_fit + 0.35·bias_fit + 0.20·corr_fit`; directional playbooks' bias weight scaled by conviction. 8 playbooks: trend_following, mean_reversion, momentum_breakout, volatility_based, ma_crossover, range_support_resistance, carry, pairs_relative_value.
-- Step 3: **LLM selects 2–3 setups** from the top-5 candidates, bound to instrument + direction, with rationale. Validated (unknown playbooks dropped, off-universe instruments cleared). Final confidence = mean(LLM confidence, deterministic fit) to prevent LLM over-optimism.
-- Deterministic fallback builds setups from top playbooks with rule-based instrument/direction selection.
-- `StrategySetup` fields: strategy, strategy_name, instrument, direction, rationale, confidence, playbook_fit, horizon, risk_note.
 
-### Execution Agent (`agents/execution.py`, `backtest.py`, `execution_schemas.py`)
-- `simulate(setup, risk=None) -> TradeCard`; `simulate_report(setups, risk)` for a batch.
-- Data: `TwelveDataLoader.get_daily` (24h disk cache) → yfinance fallback (`MarketDataLoader.get_ohlcv`) if no `TWELVE_DATA_API_KEY`.
-- Levels: ATR(14)-based, SL=1.5×ATR, TP=3×ATR (≈2:1), direction-aware.
-- **Monte Carlo bootstrap** (`simulate_barrier_bootstrap`): resamples historical daily returns into N=5000 forward paths (seeded, deterministic); close-to-close; on a bar breaching both barriers the STOP triggers first (conservative); entry+exit slippage (bps). Outputs P(TP before SL), P(SL first), P(timeout), expected R, win rate, avg bars to exit, MAE mean & p95 (in R).
-- Sizing (`compute_position_size`): units = (equity × risk_per_trade_pct) / SL-distance, capped by max_position_pct × equity. Reports units, notional, notional %, risk amount/%, capped flag. Expected P/L = expected_R × risk_amount.
-- **Skips** market-neutral / pairs setups (instrument None or contains "/") and direction=neutral with a `skip_reason` (single-instrument barrier sim not applicable).
-- LLM verdict; deterministic fallback verdict otherwise.
+- `decide(risk, briefing=None) -> StrategyReport`. Reasoning engine, **not** a
+  signal generator — produces **suggestions** the Execution Agent stress-tests.
+- Step 1: macro bias (LLM + keyword fallback).
+- Step 2: deterministic playbook scoring —
+  `score = 0.45·regime + 0.35·bias + 0.20·corr` across 8 playbooks.
+- Step 3: LLM picks **2–3 setups** (`top_n_setups=3`) from top-5 candidates,
+  each bound to instrument + direction + horizon.
+- Final confidence = mean(LLM confidence, deterministic fit).
+- `StrategySetup` fields: strategy (playbook key), strategy_name, instrument,
+  direction, rationale, confidence, playbook_fit, horizon, risk_note.
+
+### Execution Agent (`agents/execution.py`, `agents/simulation/`, `execution_schemas.py`)
+
+**Public API**
+
+- `simulate(setup, risk=None) -> TradeCard`
+- `simulate_report(setups, risk=None) -> tuple[list[TradeCard], ExecutionComparison | None]`
+
+**Data loading**
+
+- Single ticker: `TwelveDataLoader.get_daily` (24h disk cache) → yfinance fallback.
+- Pairs (`pairs_relative_value` with instrument `TICKER_A/TICKER_B`): loads both
+  legs, aligns on dates, backtests the log-spread z-score.
+
+**Historical backtest** (`run_historical_backtest`)
+
+1. For each bar after playbook-specific warmup, compute entry signal from
+   `simulation/signals/playbooks.py` via `registry.py`.
+2. Only enter when signal matches `setup.direction` (long/short).
+3. **Non-overlapping trades**: after entry, walk forward on real bars until
+   TP / SL / horizon timeout (`walk_forward_barrier`). Stop wins if both
+   barriers touched in one bar (conservative).
+4. ATR brackets at entry: SL = 1.5×ATR, TP = 3.0×ATR (≈2:1 R:R).
+5. Build equity curve, compute metrics, optional MC robustness on trade-R
+   resampling.
+
+**Playbook signal rules** (warmup typically 60 bars; carry uses 252):
+
+| Playbook key | Long entry (summary) | Short entry (summary) |
+|--------------|----------------------|------------------------|
+| `trend_following` | close > SMA50, SMA20 > SMA50 | opposite |
+| `ma_crossover` | SMA20 crosses above SMA50 | SMA20 crosses below SMA50 |
+| `momentum_breakout` | close > 20-day high | close < 20-day low |
+| `mean_reversion` | RSI(14) < 30 | RSI(14) > 70 |
+| `range_support_resistance` | bounce off 20-day low | rejection at 20-day high |
+| `volatility_based` | ATR > 75th pct of 60-day ATR window & close > SMA20 | vol filter & close < SMA20 |
+| `carry` | low realised vol + close > SMA200 | opposite |
+| `pairs_relative_value` | spread z-score < −2 | spread z-score > +2 |
+
+Unknown playbook keys fall back to `trend_following` with a logged warning.
+
+**Forward Monte Carlo** (`simulate_barrier_bootstrap`)
+
+- Resamples historical daily returns into N=5000 forward paths from **latest**
+  close (seeded, deterministic).
+- Close-to-close; stop-first on dual breach; entry+exit slippage (5 bps default).
+- Outputs: P(TP before SL), P(SL first), P(timeout), expected R, win rate, MAE.
+
+**Sizing** (`compute_position_size`)
+
+- Units = (equity × risk_per_trade_pct) / |entry − stop|, capped by
+  `max_position_pct × equity`.
+- Expected P/L = forward `expected_r × risk_amount`.
+
+**Skips simulation when**
+
+- `direction == "neutral"` or missing instrument.
+- History cannot be loaded or ATR/price invalid.
+- Pairs: second leg fails to load.
+
+**Verdict**: LLM reads deterministic stats + backtest summary; fallback rule
+based on forward edge and backtest P/L.
 
 ### Orchestrator (`agents/orchestrator.py`, `pipeline_schemas.py`)
-- `RiskPipeline(analyst, risk, strategy, execution)` — accepts injected agents (testable). `build_pipeline(with_llm=True)` wires real agents.
-- `run(query, tickers=None, use_llm=True) -> PipelineResult`.
-- LangGraph `StateGraph(PipelineState)` nodes: analyst, broaden, risk, strategy, execution, no_trade.
-- Edges: START→analyst; analyst→(conditional) broaden|risk; broaden→analyst; risk→strategy; strategy→(conditional) execution|no_trade; execution→END; no_trade→END.
-- **Thresholds**: ANALYST_CONFIDENCE_THRESHOLD=0.40, MAX_ANALYST_RETRIES=2, SETUP_CONFIDENCE_FLOOR=0.45, HIGH_VOL_CONFIDENCE_FLOOR=0.55.
-- **Broaden loop**: low Analyst confidence → LLM query rewrite (deterministic fallback appends generic macro terms) → retry, bounded.
-- **No-trade gate** (composite): no simulate-able setup, or none clears the floor, or high-vol regime with best setup < 0.55.
-- **Failure isolation**: each node wrapped in try/except; errors recorded in state; degrades to no_trade instead of crashing.
-- `PipelineResult`: query, original_query, tickers, decision (trade|no_trade), no_trade_reason, briefing, risk, strategy, cards, analyst_attempts, route_log, errors, `render()`.
+
+- `RiskPipeline(analyst, risk, strategy, execution)` — injected agents for tests.
+- `build_pipeline(with_llm=True)` wires real agents (lazy imports inside).
+- LangGraph `StateGraph` compiled on first `run()` (not at `__init__`).
+- Nodes: analyst → broaden (loop) → risk → strategy → execution | no_trade.
+- **Thresholds**: analyst confidence 0.40, max retries 2, setup floor 0.45,
+  high-vol floor 0.55.
+- **Tradeable setups**: directional, confidence ≥ floor; single tickers OR
+  `pairs_relative_value` with `A/B` instrument format.
+- **Failure isolation**: per-node try/except → graceful no_trade.
+- `PipelineResult` now includes `execution_comparison` when execution runs.
 
 ---
 
 ## 5. Data model summary (Pydantic outputs)
 
-- `MacroBriefing`: query, summary, key_points[], risks[], citations[], confidence, confidence_breakdown, llm_self_confidence, model.
-- `RiskSummary`: universe, vol_regime, vix_level, mean_realised_vol, per_asset[], correlation_warnings[], concentration, position_sizing[], narrative, analyst_query/confidence.
-- `StrategyReport`: macro_bias, vol_regime, universe, candidate_scores[], setups[], suppressed[], narrative, analyst_query/confidence, llm_used.
-- `TradeCard`: instrument, strategy, direction, horizon, simulated, skip_reason, levels, stats, sizing, expectancy_amount, data_source, bars_used, verdict, llm_used.
-- `PipelineResult`: see orchestrator above.
+| Model | Key fields |
+|-------|------------|
+| `MacroBriefing` | query, summary, key_points[], risks[], citations[], confidence, breakdown |
+| `RiskSummary` | universe, vol_regime, vix_level, per_asset[], correlation_warnings[], position_sizing[], narrative |
+| `StrategyReport` | macro_bias, candidate_scores[], setups[] (2–3), suppressed[], narrative |
+| `TradeCard` | instrument, strategy, direction, horizon, simulated, skip_reason, **levels**, **stats** (forward MC), **backtest**, sizing, expectancy_amount, verdict |
+| `BacktestResult` | period_start/end, metrics, trades[], equity_curve[], drawdown_curve[], mc_robustness |
+| `BacktestMetrics` | n_trades, win_rate, profit_factor, total_pnl, max_drawdown_pct/amount, sharpe, sortino, calmar, expectancy_r, low_sample |
+| `ExecutionComparison` | ranked[], best_sharpe, best_pnl, lowest_drawdown |
+| `PipelineResult` | all stage outputs + cards + **execution_comparison** + decision, route_log, errors |
 
-All have a `render()` method for human-readable CLI output.
+All major models expose `render()` for CLI-friendly text output.
 
 ---
 
-## 6. Data freshness (important, commonly misunderstood)
+## 6. Data freshness
 
 Two independent planes:
-1. **RAG corpus (Qdrant)** — static. Written ONLY by `python -m rag.corpus_builder` (manual). The Analyst is read-only and never ingests. No scheduler exists. Re-run the builder to refresh; ingestion is idempotent (deterministic uuid5 content-hash IDs → no duplicates); `--reset` drops & rebuilds. Old chunks are never auto-deleted (no TTL) without `--reset`.
-2. **Live market data** — Risk (yfinance, no cache) and Execution (Twelve Data 24h cache → yfinance) fetch fresh every run.
 
-Current corpus composition (approx): 97 SEC filings, 48 FOMC minutes, 20 news. Retrieval is relevance-based, so a Fed-centric query returns mostly FOMC chunks; company/market queries surface SEC/news. This is expected, not a bug.
+1. **RAG corpus (Qdrant)** — static. Written only by `python -m rag.corpus_builder`
+   (manual). Analyst is read-only. Idempotent uuid5 IDs; `--reset` rebuilds.
+2. **Live market data** — Risk fetches yfinance every run. Execution uses Twelve
+   Data (24h cache) or yfinance fallback every run.
+
+Corpus mix (approx): 97 SEC, 48 FOMC, 20 news. Fed-centric queries return mostly
+FOMC chunks — expected retrieval behaviour.
 
 ---
 
@@ -186,114 +346,199 @@ Current corpus composition (approx): 97 SEC filings, 48 FOMC minutes, 20 news. R
 
 ```powershell
 cd mafas
-docker compose up -d
-ollama serve                                   # + ollama pull mistral (once)
-.\.venv\Scripts\python -m rag.corpus_builder   # build/refresh corpus (add --reset to rebuild)
+docker compose up -d          # Qdrant only (or use root compose for dashboard)
+ollama serve                  # + ollama pull mistral (once)
+.\.venv\Scripts\python -m rag.corpus_builder
 
-# individual agents
+# Individual agents
 .\.venv\Scripts\python -m agents.analyst "Fed stance on inflation?"
 .\.venv\Scripts\python -m agents.risk TSLA
 .\.venv\Scripts\python -m agents.strategy "Fed outlook?" TSLA
 .\.venv\Scripts\python -m agents.execution NVDA --strategy trend_following --direction long
 
-# full orchestrated pipeline
+# Full pipeline
 .\.venv\Scripts\python -m agents.orchestrator "Fed stance on rates?" TSLA
 .\.venv\Scripts\python -m agents.orchestrator "obscure query" --no-llm
 
-# tests + smoke
-.\.venv\Scripts\pytest tests/ -v                # 101 core tests
+# Tests
+.\.venv\Scripts\python -m pytest tests/ -v
+
+# Backtest / execution tests only (no langgraph corpus analyst needed for subset)
+.\.venv\Scripts\python -m pytest tests/test_signals.py tests/test_backtest_metrics.py tests/test_historical_backtest.py tests/test_execution.py -v
+
+# Live smoke
 .\.venv\Scripts\python scripts/smoke_pipeline.py --tickers TSLA --show-reports
 ```
 
-Every agent CLI and `build_*` factory supports `--no-llm` / `with_llm=False` for
-deterministic, offline operation.
+Every agent supports `--no-llm` / `with_llm=False` for deterministic operation.
+
+### Dashboard (repository root)
+
+```powershell
+copy .env.example .env
+docker compose up --build
+```
+
+Demo mode serves deterministic fixtures including backtest metrics and
+`execution_comparison` without Ollama or live market data.
 
 ---
 
-## 8. Conventions to follow when extending
+## 8. Conventions when extending
 
-- New agent = pure core module + `*_schemas.py` (Pydantic + `render()`) + agent class with `build_*_agent()` factory + CLI `main()` + mocked-LLM unit tests + a stage in `smoke_pipeline.py`.
-- Hybrid pattern: deterministic result is ground truth; LLM is additive and must have a deterministic fallback (`llm_used` flag on outputs).
-- Use `loguru` for logging, `pydantic` for schemas, `tenacity` for network retries, `httpx` for HTTP.
-- Redact secrets in logs (e.g. FRED errors log only exception type — API key can appear in URLs).
-- Pin new dependencies in `requirements.txt` and export new public symbols in `agents/__init__.py`.
-- Keep the project structure and core concepts stable (explicit standing instruction from the project owner).
+### New agent stage
+
+Pure core module + `*_schemas.py` (Pydantic + `render()`) + agent class with
+`build_*_agent()` + CLI `main()` + mocked unit tests + `smoke_pipeline.py` stage.
+
+### Simulation / backtest changes
+
+- Put **pure, testable logic** in `agents/simulation/` — no I/O in metrics,
+  signals, or barrier code.
+- Playbook entry rules live in `simulation/signals/playbooks.py`; register in
+  `registry.py`.
+- Extend `BacktestResult` / `TradeCard` schemas before touching the dashboard.
+- Keep `backtest.py` as a re-export shim if renaming public functions.
+- Do **not** add eager heavy imports to `agents/__init__.py`.
+
+### Hybrid LLM pattern
+
+Deterministic output is ground truth. LLM narrates only. Always set `llm_used`
+and provide a deterministic fallback.
+
+### Dependencies
+
+Pin in `requirements.txt`. NumPy 2.x requires SciPy ≥ 1.14 and scikit-learn ≥
+1.5. Use `loguru`, `pydantic`, `tenacity`, `httpx` per existing style.
 
 ---
 
-## 9. Security notes (already implemented)
+## 9. Security notes
 
-- FRED exceptions log only the exception type (API key can leak via request URL).
-- RAG context wraps sources in `<source_data>` tags; system prompts state the content is data, not instructions (prompt-injection hardening).
-- XML parsing (SEC filings) guarded by `defusedxml` + a 10 MB cap (billion-laughs / XXE).
-- FOMC loader allowlists `www.federalreserve.gov` (SSRF guard).
-- Dependencies pinned to exact versions.
+- FRED errors log exception type only (API key can appear in URLs).
+- RAG context uses `<source_data>` tags; prompts state content is data, not
+  instructions.
+- SEC XML: `defusedxml` + 10 MB cap.
+- FOMC loader allowlists `www.federalreserve.gov`.
+- No authentication on localhost dashboard. Corpus reset requires typing
+  `RESET FINANCIAL DOCS`. **No brokerage / order endpoints.**
 
 ---
 
-## 10. Test counts & status
+## 10. Tests & troubleshooting
 
-- 101 core unit tests passing (prerequisites, analyst, risk, strategy,
-  execution, orchestrator and dashboard-facing progress contracts), all mocked
-  (no network/LLM).
-- Live 4-stage `smoke_pipeline.py` and orchestrator verified end-to-end.
+### Test files
+
+| File | What it covers |
+|------|----------------|
+| `test_prerequisites.py` | cleaner, chunker, metadata, embedder |
+| `test_analyst.py` | confidence, Analyst (mocked LLM/retriever) |
+| `test_risk.py` | risk metrics + RiskAgent |
+| `test_strategy.py` | playbook scoring, StrategyAgent |
+| `test_signals.py` | 8 playbook signal generators |
+| `test_backtest_metrics.py` | Sharpe, drawdown, profit factor, MC bands |
+| `test_historical_backtest.py` | historical engine, barrier walk |
+| `test_execution.py` | sizing, forward MC, ExecutionAgent, backtest on card |
+| `test_orchestrator.py` | LangGraph paths with fake agents |
+| `test_corpus_dashboard.py` | dashboard/corpus contracts |
+
+All unit tests use synthetic data and mocks — **no network**.
+
+### Common failures
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `AttributeError: _ARRAY_API not found` during collection | Old SciPy + NumPy 2.x in wrong Python | Use venv; `pip install "scipy>=1.14.0"` |
+| `ModuleNotFoundError: langgraph` | Missing dep or wrong Python | `pip install -r requirements.txt` in venv |
+| `ModuleNotFoundError: fredapi` | Same | `pip install -r requirements.txt` |
+| Tests import analyst when testing execution | Fixed by lazy `agents/__init__.py` | Pull latest; import `agents.simulation` paths directly in new tests |
+| All orchestrator tests fail, backtest tests pass | langgraph not installed | Install requirements or run backtest subset only |
 
 ---
 
 ## 11. Dashboard architecture
 
-The dashboard is a thin interface over the existing Python domain layer; it
-does not duplicate agent calculations:
+Thin UI over the Python domain layer — no duplicated agent maths.
 
 ```
 Browser (Next.js)
-  ↕ REST + Server-Sent Events
+  ↕ REST + SSE
 FastAPI API
   ├─ bounded background job runner
-  ├─ MySQL conversations, events and structured results
-  ├─ LangGraph RiskPipeline / individual agent factories
-  └─ health, corpus controls and report exports
+  ├─ MySQL conversations, events, structured results
+  ├─ LangGraph RiskPipeline / per-agent runners
+  └─ health, corpus controls, report exports
        ↕
 Qdrant + host Ollama + market/document APIs
 ```
 
-- **Full workspace**: one-shot runs and bounded, context-aware follow-ups. The
-  current question remains the RAG retrieval query; up to three recent turns
-  are supplied separately as explicitly untrusted context so chat history does
-  not become financial evidence or override prompts.
-- **Individual workspaces**: Analyst, Risk, Strategy and Execution each expose
-  guided inputs plus validated advanced JSON. Stored upstream artifacts can be
-  reused rather than copied manually.
-- **Live progress**: the orchestrator and corpus builder emit optional
-  best-effort callbacks. FastAPI persists these as job events and streams them
-  over SSE; callback failures can never break the underlying analysis.
-- **Persistence**: MySQL stores conversations, messages, job metadata, stage
-  events and final JSON. It does not copy Qdrant documents, market history or
-  binary PDFs. Reports are regenerated as JSON/Markdown or printed to PDF in
-  the browser.
-- **Demo mode**: deterministic fixtures use the same job/event/result UI path
-  and are clearly labelled. Live mode uses Qdrant, Ollama and market sources.
-- **Safety**: no authentication is needed for this localhost-only owner tool.
-  Corpus reset still requires the exact typed phrase `RESET FINANCIAL DOCS`.
-  The product is simulation-only and has no brokerage/order endpoint.
-- **Infrastructure**: root `docker-compose.yml` starts Next.js, FastAPI, MySQL
-  and Qdrant. Ollama remains host-native and is reached from the backend via
-  `host.docker.internal`. The explicitly named Qdrant volume preserves the
-  corpus created by the original Qdrant-only Compose setup.
+### Result visualisation (`frontend/src/components/result-view.tsx`)
 
-Dashboard outputs map directly to the Pydantic contracts. The Risk schema also
-contains the complete pairwise correlation matrix for the heatmap, and
-`RiskPipeline.run()` accepts optional progress/context arguments while
-remaining backward-compatible with CLI callers.
+- **Analyst / Risk / Strategy** panels — existing structured views.
+- **Execution comparison** — ranked table across top setups (Sharpe, P/L, DD,
+  forward E[R]); highlights for best Sharpe, best P/L, lowest drawdown.
+- **Per TradeCard**:
+  - Forward MC: probability bar, expected R, MAE, sizing.
+  - **Backtest panel**: total P/L, max DD, Sharpe/Sortino/Calmar, profit factor,
+    win rate, equity + drawdown sparklines (SVG), recent trades table.
+- Demo fixtures in `backend/app/runners.py` include sample `backtest` and
+  `execution_comparison` blocks.
+
+### Other dashboard behaviour
+
+- Full workspace: one-shot + bounded contextual follow-ups (history is
+  untrusted context, not RAG evidence).
+- Individual agent workspaces with guided + advanced JSON inputs.
+- SSE job events from orchestrator progress callbacks.
+- MySQL stores conversations and JSON results — not Qdrant docs or PDFs.
+- Ollama via `host.docker.internal` when backend runs in Docker.
 
 ---
 
-## 12. Possible next steps
+## 12. Mental model for new agents
 
-- Scheduled corpus refresh (the dashboard currently provides explicit,
-  job-tracked refresh/reset actions).
-- Richer simulation: intrabar high/low modelling (currently close-to-close), strategy-implied drift, pairs/spread backtest so market-neutral setups aren't skipped.
-- Optional multi-user authentication if the dashboard is ever exposed beyond
-  localhost.
-- Production queue/object storage if deployment moves beyond the single-owner
-  local Docker model.
+If you are picking up this codebase cold, follow this reading order:
+
+1. **This file** — orientation.
+2. `agents/orchestrator.py` — how the four agents connect.
+3. `agents/strategy_schemas.py` + `strategy_playbooks.py` — what a “setup” is.
+4. `agents/simulation/historical.py` + `signals/playbooks.py` — how setups are
+   backtested.
+5. `agents/execution.py` + `execution_schemas.py` — how results become
+   `TradeCard` + `ExecutionComparison`.
+6. `frontend/src/components/result-view.tsx` — how JSON reaches the UI.
+7. `backend/app/runners.py` — how the API invokes agents and demo fixtures.
+
+**Do not confuse:**
+
+- **Strategy Agent** → picks *which* playbook and direction to try (reasoning).
+- **Execution Agent** → measures *how that idea would have traded* (simulation).
+- **Forward MC** (`stats`) → uncertainty from *today’s* entry forward.
+- **Historical backtest** (`backtest`) → evidence from *past signal-fired trades*.
+
+---
+
+## 13. Possible next steps
+
+- Reinforcement-learning forward scenario module (offline-trained, inference-only).
+- Intrabar high/low modelling in forward MC (currently close-to-close bootstrap).
+- Walk-forward train/test splits for backtest validation reporting.
+- Scheduled corpus refresh (dashboard has manual refresh/reset today).
+- Optional auth if exposed beyond localhost.
+- Production job queue if moving off single-owner local Docker.
+
+---
+
+## 14. Quick reference — key defaults
+
+| Parameter | Default | Location |
+|-----------|---------|----------|
+| Account equity | $100,000 | `EXECUTION_ACCOUNT_EQUITY` env / `ExecutionAgent` |
+| SL / TP ATR mult | 1.5 / 3.0 | `ExecutionAgent` |
+| Forward MC sims | 5,000 | `ExecutionAgent.n_sims` |
+| Lookback bars | 504 | `ExecutionAgent.lookback_bars` |
+| Horizon bars | intraday 5, swing 20, position 60 | `HORIZON_BARS` |
+| Min trades for robust metrics | 5 | `BacktestConfig.min_trades_for_metrics` |
+| Strategy setups per run | up to 3 | `StrategyAgent.top_n_setups` |
+| Analyst confidence threshold | 0.40 | `orchestrator.py` |
+| Setup confidence floor | 0.45 | `orchestrator.py` |
