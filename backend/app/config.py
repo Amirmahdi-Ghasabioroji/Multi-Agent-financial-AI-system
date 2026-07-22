@@ -26,6 +26,10 @@ def load_playbook_defaults() -> list[dict[str, Any]]:
     """Load the pure playbook module without importing the heavy ``agents`` package."""
     module_name = "_mafas_dashboard_strategy_playbooks"
     module = sys.modules.get(module_name)
+    if module is not None and not hasattr(module, "PLAYBOOKS"):
+        # A prior import attempt can leave a half-initialised module in sys.modules.
+        del sys.modules[module_name]
+        module = None
     if module is None:
         source = MAFAS_ROOT / "agents" / "strategy_playbooks.py"
         spec = importlib.util.spec_from_file_location(module_name, source)
@@ -35,6 +39,10 @@ def load_playbook_defaults() -> list[dict[str, Any]]:
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
 
+    playbooks = getattr(module, "PLAYBOOKS", None)
+    if not isinstance(playbooks, dict):
+        raise RuntimeError("Strategy playbook defaults are unavailable.")
+
     return [
         {
             "key": item.key,
@@ -43,7 +51,7 @@ def load_playbook_defaults() -> list[dict[str, Any]]:
             "directional": item.directional,
             "tags": list(item.tags),
         }
-        for item in module.PLAYBOOKS.values()
+        for item in playbooks.values()
     ]
 
 

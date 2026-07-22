@@ -1,4 +1,11 @@
-import { jobLabel, parseJsonObject, percent, titleCase } from "@/lib/format";
+import {
+  jobLabel,
+  jobQuery,
+  jobTickers,
+  parseJsonObject,
+  percent,
+  titleCase,
+} from "@/lib/format";
 import { describe, expect, it } from "vitest";
 
 describe("format helpers", () => {
@@ -24,5 +31,21 @@ describe("format helpers", () => {
     );
     expect(jobLabel({ ticker: "MSFT" })).toBe("MSFT");
     expect(jobLabel({ kind: "pipeline" })).toBe("Pipeline");
+  });
+
+  it("reads stored query and tickers from job payload/result", () => {
+    const job = {
+      payload: {
+        query: "How is the rate outlook?",
+        tickers: ["aapl", "MSFT"],
+      },
+      result: {
+        query: "Rewritten query",
+        risk: { universe: ["NVDA"] },
+      },
+    };
+    expect(jobQuery(job)).toBe("How is the rate outlook?");
+    expect(jobTickers(job)).toEqual(["AAPL", "MSFT"]);
+    expect(jobLabel(job)).toBe("How is the rate outlook?");
   });
 });

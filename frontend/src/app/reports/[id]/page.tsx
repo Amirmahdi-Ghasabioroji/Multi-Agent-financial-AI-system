@@ -11,7 +11,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { jobLabel, shortDate, titleCase } from "@/lib/format";
+import { jobLabel, jobQuery, jobTickers, shortDate, titleCase } from "@/lib/format";
 import type { Job, RunKind } from "@/lib/types";
 import {
   Download,
@@ -48,6 +48,8 @@ export default function ReportPage() {
   }, [load]);
 
   const kind = (job?.kind ?? job?.agent ?? "pipeline") as RunKind;
+  const sourceQuery = job ? jobQuery(job) : "";
+  const sourceTickers = job ? jobTickers(job) : [];
 
   return (
     <>
@@ -98,12 +100,12 @@ export default function ReportPage() {
           <Panel>
             <SectionHeading
               eyebrow="Research brief"
-              title={job.query ?? "No source query was stored"}
+              title={sourceQuery || "No source query was stored"}
               detail={
-                job.tickers?.length
-                  ? `Instruments: ${job.tickers.join(", ")}`
-                  : job.ticker
-                    ? `Instrument: ${job.ticker}`
+                sourceTickers.length === 1
+                  ? `Instrument: ${sourceTickers[0]}`
+                  : sourceTickers.length
+                    ? `Instruments: ${sourceTickers.join(", ")}`
                     : "Instrument universe not reported"
               }
             />

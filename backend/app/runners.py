@@ -242,7 +242,7 @@ def _pipeline_runner(payload: dict[str, Any], emit: EventEmitter) -> Any:
     ensure_core_import_path()
     from agents.orchestrator import build_pipeline
 
-    emit("progress", "Building pipeline agents", {"stage": "initialise"})
+    emit("progress", "Loading embedding model and pipeline agents", {"stage": "initialise"})
     pipeline = build_pipeline(with_llm=bool(payload.get("use_llm", True)))
     pipeline.risk.lookback_days = int(payload.get("lookback_days", 252))
     run_kwargs: dict[str, Any] = {

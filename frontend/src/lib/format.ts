@@ -80,6 +80,65 @@ export function parseJsonObject(value: string): {
   }
 }
 
+function readString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function readTickerList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim().toUpperCase() : ""))
+    .filter(Boolean);
+}
+
+export function jobQuery(job: {
+  query?: string;
+  payload?: JsonRecord;
+  result?: JsonRecord;
+}): string {
+  const payload = asRecord(job.payload);
+  const result = asRecord(job.result);
+  const briefing = asRecord(result.briefing);
+  return (
+    readString(job.query) ||
+    readString(payload.query) ||
+    readString(result.query) ||
+    readString(briefing.query) ||
+    readString(result.analyst_query) ||
+    readString(payload.analyst_query)
+  );
+}
+
+export function jobTickers(job: {
+  ticker?: string;
+  tickers?: string[];
+  payload?: JsonRecord;
+  result?: JsonRecord;
+}): string[] {
+  const payload = asRecord(job.payload);
+  const result = asRecord(job.result);
+  const risk = asRecord(result.risk);
+  const strategy = asRecord(result.strategy);
+
+  for (const list of [
+    job.tickers,
+    payload.tickers,
+    result.tickers,
+    risk.universe,
+    strategy.universe,
+  ]) {
+    const tickers = readTickerList(list);
+    if (tickers.length) return tickers;
+  }
+
+  for (const value of [job.ticker, payload.ticker, result.ticker]) {
+    const ticker = readString(value).toUpperCase();
+    if (ticker) return [ticker];
+  }
+
+  return [];
+}
+
 export function jobLabel(job: {
   query?: string;
   ticker?: string;
@@ -87,13 +146,11 @@ export function jobLabel(job: {
   kind?: string;
   agent?: string;
   payload?: JsonRecord;
+  result?: JsonRecord;
 }) {
-  return (
-    job.query?.trim() ||
-    String(job.payload?.query ?? "").trim() ||
-    job.ticker ||
-    String(job.payload?.ticker ?? "").trim() ||
-    job.tickers?.join(", ") ||
-    titleCase(job.kind ?? job.agent ?? "Research run")
-  );
+  const query = jobQuery(job);
+  if (query) return query;
+  const tickers = jobTickers(job);
+  if (tickers.length) return tickers.join(", ");
+  return titleCase(job.kind ?? job.agent ?? "Research run");
 }
