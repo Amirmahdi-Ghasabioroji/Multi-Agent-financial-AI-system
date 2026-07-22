@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -44,7 +45,9 @@ from agents.risk_schemas import (
     RiskSummary,
 )
 from agents.schemas import MacroBriefing
-from data.loaders.market import MarketDataLoader
+
+if TYPE_CHECKING:
+    from data.loaders.market import MarketDataLoader
 
 # Same mega-cap universe ingested into the corpus, so the Risk Agent's default
 # view aligns with what the Analyst reasons about.
@@ -332,6 +335,8 @@ class RiskAgent:
 
 def build_risk_agent(with_llm: bool = True) -> RiskAgent:
     """Construct a RiskAgent from environment configuration."""
+    from data.loaders.market import MarketDataLoader
+
     load_dotenv()
     fred_api_key = os.getenv("FRED_API_KEY", "")
     cache_dir = os.getenv("CACHE_DIR", "./data/cache")

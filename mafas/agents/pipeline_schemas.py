@@ -13,7 +13,7 @@ from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
-from agents.execution_schemas import TradeCard
+from agents.execution_schemas import ExecutionComparison, TradeCard
 from agents.risk_schemas import RiskSummary
 from agents.schemas import MacroBriefing
 from agents.strategy_schemas import StrategyReport
@@ -34,6 +34,7 @@ class PipelineState(TypedDict, total=False):
     risk: RiskSummary | None
     strategy: StrategyReport | None
     cards: list[TradeCard]
+    execution_comparison: ExecutionComparison | None
 
     # Control / bookkeeping
     analyst_attempts: int
@@ -56,6 +57,7 @@ class PipelineResult(BaseModel):
     risk: RiskSummary | None = None
     strategy: StrategyReport | None = None
     cards: list[TradeCard] = Field(default_factory=list)
+    execution_comparison: ExecutionComparison | None = None
 
     analyst_attempts: int = 0
     route_log: list[str] = Field(default_factory=list)
@@ -98,6 +100,19 @@ class PipelineResult(BaseModel):
                          f"{len(self.strategy.setups)} setup(s)")
         if self.decision == "trade":
             lines.append("")
+            if self.execution_comparison is not None and self.execution_comparison.ranked:
+                lines.append("EXECUTION RANKING")
+                lines.append("-" * 72)
+                for row in self.execution_comparison.ranked:
+                    sharpe = (
+                        f"{row.sharpe_ratio:.2f}" if row.sharpe_ratio is not None else "n/a"
+                    )
+                    lines.append(
+                        f"#{row.rank} {row.strategy} | {row.instrument} | "
+                        f"score={row.composite_score:.2f} Sharpe={sharpe} "
+                        f"P/L=${row.total_pnl:+,.0f} DD={row.max_drawdown_pct:.0%}"
+                    )
+                lines.append("")
             lines.append("TRADE CARDS")
             lines.append("-" * 72)
             for c in self.cards:

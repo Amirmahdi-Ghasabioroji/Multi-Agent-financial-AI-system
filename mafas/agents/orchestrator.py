@@ -27,15 +27,16 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from langgraph.graph import END, START, StateGraph
 from loguru import logger
 
-from agents.execution import ExecutionAgent, build_execution_agent
 from agents.pipeline_schemas import PipelineResult, PipelineState
-from agents.risk import RiskAgent, build_risk_agent
-from agents.strategy import StrategyAgent, build_strategy_agent
+
+if TYPE_CHECKING:
+    from agents.execution import ExecutionAgent
+    from agents.risk import RiskAgent
+    from agents.strategy import StrategyAgent
 
 # Thresholds governing the conditional edges.
 ANALYST_CONFIDENCE_THRESHOLD = 0.40
@@ -73,7 +74,12 @@ class RiskPipeline:
         self.max_analyst_retries = max_analyst_retries
         self.setup_confidence_floor = setup_confidence_floor
         self._progress_callback = progress_callback
-        self._graph = self._build_graph()
+        self._graph = None
+
+    def _get_graph(self):
+        if self._graph is None:
+            self._graph = self._build_graph()
+        return self._graph
 
     def _emit(self, event: str, **payload: Any) -> None:
         """Best-effort structured progress event for API/SSE adapters."""
@@ -189,7 +195,7 @@ class RiskPipeline:
         setups = strategy.setups if strategy else []
         self._emit("stage_started", stage="execution", setups=len(setups))
         try:
-            cards = self.execution.simulate_report(setups, risk=state.get("risk"))
+            cards, comparison = self.execution.simulate_report(setups, risk=state.get("risk"))
         except Exception as exc:  # noqa: BLE001
             logger.error("Execution node failed: {}", exc)
             self._emit("stage_failed", stage="execution", error=type(exc).__name__)
@@ -206,7 +212,12 @@ class RiskPipeline:
             cards=len(cards),
             simulated=sum(1 for card in cards if card.simulated),
         )
-        return {"cards": cards, "decision": "trade", "route_log": log}
+        return {
+            "cards": cards,
+            "execution_comparison": comparison,
+            "decision": "trade",
+            "route_log": log,
+        }
 
     def _no_trade_node(self, state: PipelineState) -> PipelineState:
         log = state.get("route_log", []) + ["no_trade"]
@@ -232,8 +243,15 @@ class RiskPipeline:
             return []
         out = []
         for s in strategy.setups:
-            single = bool(s.instrument) and "/" not in (s.instrument or "")
-            if s.direction != "neutral" and single and s.confidence >= self.setup_confidence_floor:
+            has_instrument = bool(s.instrument)
+            is_pair = "/" in (s.instrument or "")
+            is_single = has_instrument and not is_pair
+            is_pairs_playbook = s.strategy == "pairs_relative_value" and is_pair
+            if (
+                s.direction != "neutral"
+                and (is_single or is_pairs_playbook)
+                and s.confidence >= self.setup_confidence_floor
+            ):
                 out.append(s)
         return out
 
@@ -293,6 +311,8 @@ class RiskPipeline:
 
     # ------------------------------ graph -------------------------------- #
     def _build_graph(self):
+        from langgraph.graph import END, START, StateGraph
+
         g = StateGraph(PipelineState)
         g.add_node("analyst", self._analyst_node)
         g.add_node("broaden", self._broaden_node)
@@ -344,7 +364,7 @@ class RiskPipeline:
         }
         # Allow enough steps for the bounded broaden loop plus the linear tail.
         try:
-            final = self._graph.invoke(initial, {"recursion_limit": 50})
+            final = self._get_graph().invoke(initial, {"recursion_limit": 50})
             result = PipelineResult(
                 query=final.get("query", query),
                 original_query=final.get("original_query", query),
@@ -355,6 +375,7 @@ class RiskPipeline:
                 risk=final.get("risk"),
                 strategy=final.get("strategy"),
                 cards=final.get("cards", []),
+                execution_comparison=final.get("execution_comparison"),
                 analyst_attempts=final.get("analyst_attempts", 0),
                 route_log=final.get("route_log", []),
                 errors=final.get("errors", []),
@@ -373,6 +394,9 @@ class RiskPipeline:
 def build_pipeline(with_llm: bool = True) -> RiskPipeline:
     """Construct a RiskPipeline with real agents from environment config."""
     from agents.analyst import build_analyst_agent
+    from agents.execution import build_execution_agent
+    from agents.risk import build_risk_agent
+    from agents.strategy import build_strategy_agent
 
     analyst = build_analyst_agent()
     risk = build_risk_agent(with_llm=with_llm)

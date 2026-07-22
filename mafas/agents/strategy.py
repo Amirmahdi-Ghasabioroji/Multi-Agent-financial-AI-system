@@ -24,9 +24,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from agents.analyst import build_analyst_agent
 from agents.llm import OllamaClient, OllamaError
-from agents.risk import build_risk_agent
 from agents.risk_schemas import RiskSummary
 from agents.schemas import MacroBriefing
 from agents.strategy_playbooks import PLAYBOOKS, rank_playbooks
@@ -406,6 +404,9 @@ def main() -> int:
     )
     args = parser.parse_args()
     use_llm = not args.no_llm
+
+    from agents.analyst import build_analyst_agent
+    from agents.risk import build_risk_agent
 
     analyst = build_analyst_agent()
     briefing = analyst.brief(args.query)
