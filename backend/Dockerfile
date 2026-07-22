@@ -4,7 +4,8 @@ FROM python:3.11-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=300 \
-    PIP_RETRIES=10
+    PIP_RETRIES=10 \
+    PIP_ROOT_USER_ACTION=ignore
 
 WORKDIR /app
 
@@ -52,13 +53,19 @@ RUN python -m pip install --retries 10 --timeout 300 \
         alembic==1.18.5 \
     || (echo "ERROR: backend API requirements install failed." >&2 && exit 1)
 
+# Bake the RAG embedder weights into the image so first pipeline runs do not
+# block for several minutes downloading from Hugging Face Hub.
+ENV HF_HOME=/root/.cache/huggingface
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
 # ---- Runtime: slim image with only runtime libraries ----
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    CACHE_DIR=/app/mafas/data/cache
+    CACHE_DIR=/app/mafas/data/cache \
+    HF_HOME=/app/.cache/huggingface
 
 WORKDIR /app
 
@@ -70,6 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /root/.cache/huggingface /app/.cache/huggingface
 
 RUN groupadd --gid 1000 appuser \
     && useradd --uid 1000 --gid 1000 --create-home appuser
@@ -77,7 +85,7 @@ RUN groupadd --gid 1000 appuser \
 COPY mafas ./mafas
 COPY backend ./backend
 
-RUN mkdir -p /app/mafas/data/cache \
+RUN mkdir -p /app/mafas/data/cache /app/.cache/huggingface \
     && chown -R appuser:appuser /app
 
 USER appuser
