@@ -30,7 +30,7 @@ class TwelveDataLoader:
 
     def __init__(
         self,
-        api_key: str = "5d15512c17e645279d3756f5f3ea2253",
+        api_key: str = "",
         cache_dir: str = "./data/cache",
         cache_ttl_hours: float = 24.0,
     ) -> None:

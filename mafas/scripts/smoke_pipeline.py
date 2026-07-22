@@ -3,7 +3,7 @@ Smoke-test the full Analyst -> Risk -> Strategy -> Execution pipeline (live).
 
 This exercises the full flow:
     1. Analyst Agent runs RAG over Qdrant + Ollama to produce a MacroBriefing.
-    2. Risk Agent consumes that briefing, pulls live market data via yfinance,
+    2. Risk Agent consumes that briefing, pulls live market data via TwelveData,
        computes deterministic risk metrics, and adds an Ollama narrative.
     3. Strategy Agent consumes both, scores the playbooks, and reasons over the
        top candidates to produce instrument-bound setup suggestions.
