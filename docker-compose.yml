@@ -1,5 +1,11 @@
 name: mafas-dashboard
 
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "100m"
+    max-file: "3"
+
 services:
   mysql:
     image: mysql:8.4
@@ -22,6 +28,9 @@ services:
       timeout: 5s
       retries: 12
       start_period: 25s
+    mem_limit: 2g
+    cpus: "2.0"
+    logging: *default-logging
     restart: unless-stopped
 
   qdrant:
@@ -36,6 +45,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    mem_limit: 1g
+    cpus: "1.0"
+    logging: *default-logging
     restart: unless-stopped
 
   backend:
@@ -46,13 +58,14 @@ services:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-mafas}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-mafas}
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-financial_docs}
-      OLLAMA_URL: http://host.docker.internal:11434
+      # host.docker.internal works on Docker Desktop; on Linux override OLLAMA_URL in .env with your host IP.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
       CACHE_DIR: /app/mafas/data/cache
       FRED_API_KEY: ${FRED_API_KEY:-}
       TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}
       EXECUTION_ACCOUNT_EQUITY: ${EXECUTION_ACCOUNT_EQUITY:-100000}
-      CORS_ORIGINS: http://localhost:3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JOB_MAX_WORKERS: ${JOB_MAX_WORKERS:-1}
     ports:
       - "127.0.0.1:8000:8000"
@@ -65,18 +78,9 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5)",
-        ]
-      interval: 15s
-      timeout: 8s
-      retries: 12
-      start_period: 45s
+    mem_limit: 4g
+    cpus: "2.0"
+    logging: *default-logging
     restart: unless-stopped
 
   frontend:
@@ -97,6 +101,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    mem_limit: 512m
+    cpus: "1.0"
+    logging: *default-logging
     restart: unless-stopped
 
 volumes:

@@ -1,15 +1,13 @@
-FROM python:3.11-slim
+# ---- Builder: compile wheels and install Python dependencies ----
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    CACHE_DIR=/app/mafas/data/cache \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=10
 
 WORKDIR /app
 
-# Native wheels for lxml/scipy/sklearn; keep image slim after install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libxml2-dev \
@@ -20,8 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY mafas/requirements.txt ./mafas/requirements.txt
 COPY backend/requirements.txt ./backend/requirements.txt
 
-# Split large downloads into separate layers so a dropped connection can retry
-# without restarting the entire dependency install.
 RUN python -m pip install --upgrade pip setuptools wheel \
     || (echo "ERROR: pip bootstrap failed." >&2 && exit 1)
 
@@ -56,9 +52,39 @@ RUN python -m pip install --retries 10 --timeout 300 \
         alembic==1.18.5 \
     || (echo "ERROR: backend API requirements install failed." >&2 && exit 1)
 
+# ---- Runtime: slim image with only runtime libraries ----
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    CACHE_DIR=/app/mafas/data/cache
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libxml2 \
+    libxslt1.1 \
+    zlib1g \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --create-home appuser
+
 COPY mafas ./mafas
 COPY backend ./backend
 
+RUN mkdir -p /app/mafas/data/cache \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
 EXPOSE 8000
+
+HEALTHCHECK --interval=15s --timeout=8s --retries=12 --start-period=120s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=5)" || exit 1
 
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
