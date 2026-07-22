@@ -130,6 +130,7 @@ test("runs the demo pipeline and renders all agent results", async ({ page }) =>
   await page.getByLabel("Research query").fill("Fed outlook");
   await page.getByRole("button", { name: "Start full pipeline" }).click();
 
+  await expect(page).toHaveURL(/\/runs\/demo-job$/);
   await expect(page.getByText("Live run monitor")).toBeVisible();
   await expect(page.getByText("Disinflation remains visible [1].")).toBeVisible({
     timeout: 15_000,

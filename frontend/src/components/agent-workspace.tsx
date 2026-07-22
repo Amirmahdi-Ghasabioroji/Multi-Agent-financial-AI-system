@@ -1,6 +1,5 @@
 "use client";
 
-import { JobMonitor } from "@/components/job-monitor";
 import {
   Badge,
   ErrorState,
@@ -11,7 +10,7 @@ import {
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { parseJsonObject, titleCase } from "@/lib/format";
-import type { AgentKind, Job, RunRequest } from "@/lib/types";
+import type { AgentKind, RunRequest } from "@/lib/types";
 import {
   Braces,
   BrainCircuit,
@@ -24,6 +23,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 const config: Record<
@@ -117,6 +117,7 @@ function JsonInput({
 }
 
 export function AgentWorkspace({ kind }: { kind: AgentKind }) {
+  const router = useRouter();
   const details = config[kind];
   const Icon = details.icon;
   const [query, setQuery] = useState("");
@@ -127,7 +128,6 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
   const [primaryJson, setPrimaryJson] = useState("");
   const [secondaryJson, setSecondaryJson] = useState("");
   const [advancedJson, setAdvancedJson] = useState("");
-  const [job, setJob] = useState<Job>();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -143,7 +143,6 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
     setSecondaryJson("");
     setAdvancedJson("");
     setError("");
-    setJob(undefined);
   };
 
   const submit = async (event: FormEvent) => {
@@ -226,7 +225,8 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
     setSubmitting(true);
     setError("");
     try {
-      setJob(await api.run(kind, payload));
+      const created = await api.run(kind, payload);
+      router.push(`/runs/${created.id}`);
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -391,11 +391,7 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
         </form>
 
         <div className="stack">
-          {job ? (
-            <JobMonitor initialJob={job} kind={kind} />
-          ) : (
-            <>
-              <Panel>
+          <Panel>
                 <SectionHeading eyebrow="Output contract" title="What to expect" />
                 <div className="timeline">
                   {kind === "analyst" && (
@@ -427,8 +423,8 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
                     </>
                   )}
                 </div>
-              </Panel>
-              <div className="callout callout-amber">
+          </Panel>
+          <div className="callout callout-amber">
                 <Database size={20} />
                 <div>
                   <strong>Research simulation boundary</strong>
@@ -438,8 +434,7 @@ export function AgentWorkspace({ kind }: { kind: AgentKind }) {
                   </p>
                 </div>
               </div>
-            </>
-          )}
+          </div>
         </div>
       </div>
     </>

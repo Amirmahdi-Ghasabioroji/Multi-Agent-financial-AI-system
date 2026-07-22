@@ -84,9 +84,42 @@ describe("ResultView", () => {
 
     expect(screen.getByText("Inflation is moderating [1].")).toBeInTheDocument();
     expect(screen.getByText("Medium")).toBeInTheDocument();
-    expect(screen.getAllByText("Trend Following").length).toBeGreaterThan(0);
-    expect(screen.getByText("185")).toBeInTheDocument();
+    expect(screen.getByText("Trend Following · AAPL · LONG")).toBeInTheDocument();
     expect(screen.getByText(/Positive simulated expectancy/)).toBeInTheDocument();
+  });
+
+  it("labels multiple execution trade cards", () => {
+    render(
+      <ResultView
+        kind="pipeline"
+        result={{
+          cards: [
+            {
+              strategy_name: "Trend Following",
+              instrument: "AAPL",
+              direction: "long",
+              levels: { entry: 185, stop_loss: 176, take_profit: 203 },
+              stats: { prob_tp_before_sl: 0.55, expected_r: 0.4, mae_p95_r: 0.95 },
+              sizing: { notional_pct: 0.2 },
+              verdict: "Positive simulated expectancy.",
+            },
+            {
+              strategy_name: "Mean Reversion",
+              instrument: "MSFT",
+              direction: "short",
+              levels: { entry: 410, stop_loss: 420, take_profit: 390 },
+              stats: { prob_tp_before_sl: 0.45, expected_r: 0.2, mae_p95_r: 1.1 },
+              sizing: { notional_pct: 0.15 },
+              verdict: "Edge is marginal under current volatility.",
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Trade 1 · Trend Following · AAPL · LONG")).toBeInTheDocument();
+    expect(screen.getByText("Trade 2 · Mean Reversion · MSFT · SHORT")).toBeInTheDocument();
+    expect(screen.getByText("Verdict")).toBeInTheDocument();
   });
 });
 
@@ -143,7 +176,7 @@ describe("ResultView compatibility", () => {
     expect(screen.getByText("Quarterly filing")).toBeInTheDocument();
     expect(screen.getByText("Correlation matrix")).toBeInTheDocument();
     expect(screen.getByText("Conditional momentum")).toBeInTheDocument();
-    expect(screen.getByText("Execution geometry")).toBeInTheDocument();
+    expect(screen.getByText("Trade card 1")).toBeInTheDocument();
   });
 
   it("shows a raw fallback for unrecognized output", () => {

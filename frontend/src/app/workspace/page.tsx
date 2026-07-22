@@ -1,6 +1,5 @@
 "use client";
 
-import { JobMonitor } from "@/components/job-monitor";
 import {
   Badge,
   ErrorState,
@@ -10,7 +9,7 @@ import {
   SectionHeading,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import type { Conversation, Job, RunRequest } from "@/lib/types";
+import type { Conversation, RunRequest } from "@/lib/types";
 import {
   BrainCircuit,
   Database,
@@ -21,11 +20,13 @@ import {
   Target,
   Zap,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "SPY", "QQQ"];
 
 export default function PipelineWorkspace() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [tickers, setTickers] = useState<string[]>(["AAPL"]);
   const [customTicker, setCustomTicker] = useState("");
@@ -38,7 +39,6 @@ export default function PipelineWorkspace() {
   const [conversationId, setConversationId] = useState("");
   const [conversationTitle, setConversationTitle] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [job, setJob] = useState<Job>();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -121,7 +121,7 @@ export default function PipelineWorkspace() {
           : {}),
       };
       const created = await api.run("pipeline", payload);
-      setJob(created);
+      router.push(`/runs/${created.id}`);
     } catch (requestError) {
       setError(errorMessage(requestError));
     } finally {
@@ -302,7 +302,6 @@ export default function PipelineWorkspace() {
                   setQuery("");
                   setTickers(["AAPL"]);
                   setError("");
-                  setJob(undefined);
                 }}
               >
                 <RotateCcw size={15} />
@@ -313,55 +312,49 @@ export default function PipelineWorkspace() {
         </form>
 
         <div className="stack">
-          {job ? (
-            <JobMonitor initialJob={job} kind="pipeline" />
-          ) : (
-            <>
-              <Panel>
-                <SectionHeading eyebrow="Route preview" title="Agent hand-offs" />
-                <div className="timeline">
-                  {[
-                    [BrainCircuit, "Analyst", "Evidence and confidence"],
-                    [ShieldCheck, "Risk", "Regime and constraints"],
-                    [Target, "Strategy", "Scored playbooks"],
-                    [Zap, "Execution", "Geometry and verdict"],
-                  ].map(([Icon, title, detail]) => {
-                    const StageIcon = Icon as typeof BrainCircuit;
-                    return (
-                      <div className="timeline-item" key={String(title)}>
-                        <div className="timeline-dot">
-                          <StageIcon size={15} />
-                        </div>
-                        <strong>{String(title)}</strong>
-                        <span>{String(detail)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Panel>
-              <div className="callout callout-amber">
-                <Database size={20} />
-                <div>
-                  <strong>{demo ? "Frozen dataset selected" : "Live mode requested"}</strong>
-                  <p>
-                    {demo
-                      ? "Useful for repeatable evaluation. Dates and market values may be historical."
-                      : "Live labels indicate requested data mode, not guaranteed source freshness. Check citations and timestamps."}
-                  </p>
-                </div>
-              </div>
-              <div className="callout">
-                <GitBranch size={20} />
-                <div>
-                  <strong>Conversation-aware research</strong>
-                  <p>
-                    Reusing context can improve continuity, but prior assumptions
-                    should still be revalidated on every run.
-                  </p>
-                </div>
-              </div>
-            </>
-          )}
+          <Panel>
+            <SectionHeading eyebrow="Route preview" title="Agent hand-offs" />
+            <div className="timeline">
+              {[
+                [BrainCircuit, "Analyst", "Evidence and confidence"],
+                [ShieldCheck, "Risk", "Regime and constraints"],
+                [Target, "Strategy", "Scored playbooks"],
+                [Zap, "Execution", "Geometry and verdict"],
+              ].map(([Icon, title, detail]) => {
+                const StageIcon = Icon as typeof BrainCircuit;
+                return (
+                  <div className="timeline-item" key={String(title)}>
+                    <div className="timeline-dot">
+                      <StageIcon size={15} />
+                    </div>
+                    <strong>{String(title)}</strong>
+                    <span>{String(detail)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+          <div className="callout callout-amber">
+            <Database size={20} />
+            <div>
+              <strong>{demo ? "Frozen dataset selected" : "Live mode requested"}</strong>
+              <p>
+                {demo
+                  ? "Useful for repeatable evaluation. Dates and market values may be historical."
+                  : "Live labels indicate requested data mode, not guaranteed source freshness. Check citations and timestamps."}
+              </p>
+            </div>
+          </div>
+          <div className="callout">
+            <GitBranch size={20} />
+            <div>
+              <strong>Conversation-aware research</strong>
+              <p>
+                Reusing context can improve continuity, but prior assumptions
+                should still be revalidated on every run.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </>

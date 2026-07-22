@@ -191,10 +191,10 @@ export default function HistoryPage() {
                       <td>
                         <div className="inline-actions">
                           <Link
-                            href={`/reports/${job.id}`}
+                            href={`/runs/${job.id}`}
                             className="icon-button"
-                            title="Open report"
-                            aria-label={`Open report for ${jobLabel(job)}`}
+                            title="Open run monitor"
+                            aria-label={`Open run monitor for ${jobLabel(job)}`}
                           >
                             <ExternalLink size={15} />
                           </Link>

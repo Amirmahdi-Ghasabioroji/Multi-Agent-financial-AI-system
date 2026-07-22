@@ -430,18 +430,7 @@ function StrategyResult({ data }: { data: JsonRecord }) {
               return (
                 <article className="setup-card" key={index}>
                   <header>
-                    <strong>
-                      {String(
-                        getValue(item, [
-                          "strategy_name",
-                          "name",
-                          "strategy",
-                          "ticker",
-                          "setup",
-                        ]) ??
-                          `Setup ${index + 1}`,
-                      )}
-                    </strong>
+                    <strong>{setupTitle(item, index, setups.length)}</strong>
                     <Badge tone="teal">
                       {percent(getValue(item, ["score", "confidence", "probability"]))}
                     </Badge>
@@ -509,7 +498,76 @@ function StrategyResult({ data }: { data: JsonRecord }) {
   );
 }
 
-function ExecutionResult({ data }: { data: JsonRecord }) {
+function setupTitle(item: JsonRecord, index: number, total: number): string {
+  const name = String(
+    getValue(item, [
+      "strategy_name",
+      "name",
+      "strategy",
+      "ticker",
+      "setup",
+    ]) ?? "",
+  ).trim();
+  const instrument = String(item.instrument ?? "").trim();
+  const direction = String(item.direction ?? "").trim();
+  const parts: string[] = [];
+  if (total > 1) parts.push(`Setup ${index + 1}`);
+  if (name) parts.push(name);
+  if (instrument) parts.push(instrument);
+  if (direction) parts.push(direction.toUpperCase());
+  return parts.length ? parts.join(" · ") : `Setup ${index + 1}`;
+}
+
+function executionCardTitle(
+  data: JsonRecord,
+  index: number,
+  total: number,
+): string {
+  const strategy = String(
+    getValue(data, ["strategy_name", "strategy", "playbook"]) ?? "",
+  ).trim();
+  const instrument = String(data.instrument ?? "").trim();
+  const direction = String(data.direction ?? "").trim();
+  const parts: string[] = [];
+  if (total > 1) parts.push(`Trade ${index + 1}`);
+  if (strategy) parts.push(strategy);
+  if (instrument) parts.push(instrument);
+  if (direction) parts.push(direction.toUpperCase());
+  return parts.length ? parts.join(" · ") : `Trade card ${index + 1}`;
+}
+
+function executionStatus(data: JsonRecord): {
+  tone: "teal" | "amber" | "red";
+  label: string;
+  detail?: string;
+} {
+  const skipReason = getValue(data, [
+    "skip_reason",
+    "skipped_reason",
+    "reason_skipped",
+  ]);
+  if (skipReason) {
+    return { tone: "red", label: "Skipped", detail: String(skipReason) };
+  }
+  if (data.simulated === false) {
+    return {
+      tone: "amber",
+      label: "Not simulated",
+      detail: String(skipReason ?? "Simulation unavailable."),
+    };
+  }
+  return { tone: "teal", label: "Simulated" };
+}
+
+function ExecutionResult({
+  data,
+  index = 0,
+  total = 1,
+}: {
+  data: JsonRecord;
+  index?: number;
+  total?: number;
+}) {
   if (!Object.keys(data).length) return null;
   const levels = asRecord(data.levels);
   const stats = asRecord(data.stats);
@@ -543,20 +601,24 @@ function ExecutionResult({ data }: { data: JsonRecord }) {
     ["notional_pct", "position_size", "size"],
   );
   const verdict = getValue(data, ["verdict", "decision", "action"]);
-  const skipped = getValue(data, ["skipped_reason", "skip_reason", "reason_skipped"]);
+  const status = executionStatus(data);
+  const title = executionCardTitle(data, index, total);
+  const subtitle = [
+    data.horizon ? `${titleCase(String(data.horizon))} horizon` : "",
+    data.data_source ? `Data: ${String(data.data_source)}` : "",
+    data.bars_used ? `${String(data.bars_used)} bars` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <>
-      <section className="result-section">
-        <SectionHeading
-          eyebrow="Execution agent"
-          title="Execution geometry"
-          action={
-            <Badge tone={skipped ? "red" : "teal"}>
-              {String(verdict ?? (skipped ? "Skipped" : "Evaluated"))}
-            </Badge>
-          }
-        />
+    <section className="result-section execution-card">
+      <SectionHeading
+        eyebrow="Execution agent"
+        title={title}
+        detail={subtitle || "Monte Carlo trade geometry and sizing"}
+        action={<Badge tone={status.tone}>{status.label}</Badge>}
+      />
         <div className="trade-geometry">
           <div className="trade-level trade-stop">
             <span>Protective stop</span>
@@ -571,9 +633,7 @@ function ExecutionResult({ data }: { data: JsonRecord }) {
             <strong>{compactNumber(target)}</strong>
           </div>
         </div>
-      </section>
-      <section className="result-section">
-        <div className="grid grid-4">
+        <div className="grid grid-4" style={{ marginTop: 16 }}>
           <Metric label="Probability" value={percent(probability)} icon={Gauge} tone="teal" />
           <Metric label="Expected R" value={compactNumber(expectedR)} icon={Crosshair} />
           <Metric label="MAE p95" value={`${compactNumber(mae)}R`} icon={ShieldAlert} tone="amber" />
@@ -590,17 +650,22 @@ function ExecutionResult({ data }: { data: JsonRecord }) {
             />
           </div>
         )}
-        {Boolean(skipped) && (
+        {status.detail && status.label !== "Simulated" && (
           <div className="error-box" style={{ marginTop: 16 }}>
             <CircleOff size={18} aria-hidden />
             <div>
-              <strong>Execution skipped</strong>
-              <p>{String(skipped)}</p>
+              <strong>{status.label}</strong>
+              <p>{status.detail}</p>
             </div>
           </div>
         )}
+        {verdict && (
+          <div className="execution-verdict">
+            <strong>Verdict</strong>
+            <p>{String(verdict)}</p>
+          </div>
+        )}
       </section>
-    </>
   );
 }
 
@@ -734,7 +799,12 @@ export function ResultView({
       <StrategyResult data={strategy} />
       {executionCards.length > 0 ? (
         executionCards.map((card, index) => (
-          <ExecutionResult data={card} key={index} />
+          <ExecutionResult
+            data={card}
+            key={index}
+            index={index}
+            total={executionCards.length}
+          />
         ))
       ) : (
         <ExecutionResult data={execution} />
