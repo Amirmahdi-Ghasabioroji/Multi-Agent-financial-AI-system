@@ -192,7 +192,7 @@ def run_execution(report, summary, use_llm: bool):
         src = "twelvedata" if agent.twelvedata and agent.twelvedata.is_configured() else "yfinance (no TD key)"
         ok("data_source", src)
 
-        cards = agent.simulate_report(report.setups, risk=summary)
+        cards, _comparison = agent.simulate_report(report.setups, risk=summary)
         simulated = [c for c in cards if c.simulated]
         ok("cards", f"{len(cards)} card(s), {len(simulated)} simulated")
         for c in cards:
