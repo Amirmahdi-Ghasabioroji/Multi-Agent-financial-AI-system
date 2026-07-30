@@ -1,0 +1,1 @@
+"""MAFAS dashboard backend package."""

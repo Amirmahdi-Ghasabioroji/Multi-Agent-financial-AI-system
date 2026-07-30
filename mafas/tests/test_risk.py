@@ -174,6 +174,8 @@ def test_assess_produces_full_summary(three_asset_market):
     assert len(summary.per_asset) == 3
     assert len(summary.position_sizing) == 3
     assert summary.concentration.n_assets == 3
+    assert set(summary.correlation_matrix) == {"AAPL", "MSFT", "NVDA"}
+    assert summary.correlation_matrix["AAPL"]["AAPL"] == 1.0
     assert summary.narrative  # fallback narrative present
 
 

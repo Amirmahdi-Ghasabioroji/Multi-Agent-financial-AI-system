@@ -167,6 +167,7 @@ def test_simulate_produces_card(agent_market):
     card = agent.simulate(setup, risk=_risk_with())
     assert isinstance(card, TradeCard)
     assert card.simulated is True
+    assert card.backtest is not None
     assert card.data_source == "yfinance"
     assert card.levels.entry > 0
     assert card.levels.take_profit > card.levels.entry  # long
@@ -189,7 +190,18 @@ def test_neutral_setup_not_simulated(agent_market):
                           direction="neutral", horizon="swing")
     card = agent.simulate(setup)
     assert card.simulated is False
-    assert "neutral" in card.skip_reason.lower() or "pairs" in card.skip_reason.lower()
+    assert "neutral" in card.skip_reason.lower()
+
+
+def test_simulate_report_returns_comparison(agent_market):
+    agent = ExecutionAgent(twelvedata=None, market=agent_market, llm=None)
+    setups = [
+        StrategySetup(strategy="trend_following", instrument="NVDA", direction="long"),
+        StrategySetup(strategy="ma_crossover", instrument="NVDA", direction="long"),
+    ]
+    cards, comparison = agent.simulate_report(setups, risk=_risk_with())
+    assert len(cards) == 2
+    assert all(c.backtest is not None for c in cards if c.simulated)
 
 
 def test_missing_data_skips_gracefully(agent_market):
@@ -235,4 +247,5 @@ def test_render_smoke(agent_market):
     text = card.render()
     assert "TRADE CARD" in text
     assert "SIMULATION" in text
+    assert "BACKTEST" in text
     assert "SIZING" in text

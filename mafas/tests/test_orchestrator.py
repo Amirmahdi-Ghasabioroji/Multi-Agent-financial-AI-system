@@ -67,6 +67,13 @@ class FakeStrategy:
 
 class FakeExecution:
     def simulate_report(self, setups, risk=None):
+        from agents.execution_schemas import (
+            BacktestMetrics,
+            BacktestResult,
+            ExecutionComparison,
+            ExecutionComparisonEntry,
+        )
+
         cards = []
         for s in setups:
             cards.append(
@@ -77,10 +84,33 @@ class FakeExecution:
                     direction=s.direction,
                     simulated=True,
                     stats=SimulationStats(prob_tp_before_sl=0.5, expected_r=0.3, n_sims=100),
+                    backtest=BacktestResult(
+                        metrics=BacktestMetrics(
+                            n_trades=10,
+                            total_pnl=5000.0,
+                            sharpe_ratio=1.2,
+                            max_drawdown_pct=0.05,
+                        )
+                    ),
                     expectancy_amount=100.0,
                 )
             )
-        return cards
+        comparison = ExecutionComparison(
+            ranked=[
+                ExecutionComparisonEntry(
+                    rank=1,
+                    instrument=cards[0].instrument or "",
+                    strategy=cards[0].strategy_name,
+                    composite_score=0.8,
+                    sharpe_ratio=1.2,
+                    total_pnl=5000.0,
+                    max_drawdown_pct=0.05,
+                    expected_r_forward=0.3,
+                )
+            ],
+            best_sharpe="Trend Following | NVDA",
+        )
+        return cards, comparison
 
 
 def _setup(conf=0.7, instrument="NVDA", direction="long"):
@@ -155,6 +185,8 @@ def test_high_vol_strong_setup_trades():
     p = _pipeline(FakeAnalyst([0.8]), FakeRisk(regime="high"), FakeStrategy([_setup(0.70)]), FakeExecution())
     result = p.run("q", use_llm=False)
     assert result.decision == "trade"
+    assert result.execution_comparison is not None
+    assert len(result.execution_comparison.ranked) >= 1
 
 
 def test_neutral_only_setups_no_trade():
@@ -184,3 +216,47 @@ def test_render_smoke():
     assert "MAFAS PIPELINE" in text
     assert "Route:" in text
     assert "Decision: TRADE" in text
+
+
+def test_progress_callback_reports_stages_and_completion():
+    events = []
+    p = _pipeline(
+        FakeAnalyst([0.8]),
+        FakeRisk(),
+        FakeStrategy([_setup(0.7)]),
+        FakeExecution(),
+    )
+    result = p.run(
+        "fed outlook",
+        use_llm=False,
+        progress_callback=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert result.decision == "trade"
+    names = [event for event, _ in events]
+    assert names[0] == "pipeline_started"
+    assert ("stage_started", {"stage": "analyst", "attempt": 1}) in events
+    assert names[-1] == "pipeline_completed"
+
+
+def test_conversation_context_is_forwarded_to_analyst():
+    class ContextAnalyst(FakeAnalyst):
+        def brief(
+            self,
+            query,
+            doc_type=None,
+            date_after=None,
+            conversation_context=None,
+        ):
+            self.context = conversation_context
+            return super().brief(query, doc_type=doc_type, date_after=date_after)
+
+    analyst = ContextAnalyst([0.8])
+    p = _pipeline(
+        analyst,
+        FakeRisk(),
+        FakeStrategy([_setup(0.7)]),
+        FakeExecution(),
+    )
+    p.run("What changed?", conversation_context="Earlier we discussed inflation.")
+    assert analyst.context == "Earlier we discussed inflation."
