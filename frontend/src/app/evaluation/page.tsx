@@ -14,7 +14,7 @@ import {
 import { api, errorMessage } from "@/lib/api";
 import { shortDate } from "@/lib/format";
 import type { Job } from "@/lib/types";
-import { ClipboardCheck, Play, RefreshCw } from "lucide-react";
+import { ClipboardCheck, ExternalLink, Play, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -103,6 +103,10 @@ export default function EvaluationPage() {
       ? (activeJob.result as Record<string, unknown>)
       : null;
 
+  const running =
+    activeJob &&
+    !["succeeded", "completed", "failed", "cancelled"].includes(activeJob.status);
+
   return (
     <>
       <PageHeader
@@ -113,13 +117,37 @@ export default function EvaluationPage() {
         <Badge tone="teal">On demand</Badge>
       </PageHeader>
 
-      <div className="grid grid-main">
-        <div className="stack">
+      <div className="grid grid-evaluation">
+        <div className="evaluation-main stack">
+          {running ? (
+            <JobMonitor initialJob={activeJob} kind="pipeline" />
+          ) : report ? (
+            <EvaluationReport report={report} />
+          ) : activeJob?.status === "failed" ? (
+            <ErrorState
+              message={
+                typeof activeJob.error === "string"
+                  ? activeJob.error
+                  : "Evaluation job failed."
+              }
+            />
+          ) : (
+            <Panel>
+              <SectionHeading
+                eyebrow="Report"
+                title="Select or run an evaluation"
+                detail="Completed reports appear here with suite-level metrics and scenario tables."
+              />
+            </Panel>
+          )}
+        </div>
+
+        <aside className="evaluation-sidebar stack">
           <Panel>
             <SectionHeading
-              eyebrow="Run evaluation"
-              title="Launch a new report"
-              detail="RAG requires a built Qdrant corpus. Risk uses live market data."
+              eyebrow="Run"
+              title="Launch evaluation"
+              detail="RAG needs corpus. Risk uses live data."
               action={<ClipboardCheck size={18} />}
             />
             <div className="stack">
@@ -147,7 +175,7 @@ export default function EvaluationPage() {
                   onClick={() => void runEvaluation()}
                 >
                   <Play size={16} />
-                  {submitting ? "Starting evaluation…" : "Run evaluation"}
+                  {submitting ? "Starting…" : "Run evaluation"}
                 </button>
                 <button
                   className="button button-secondary"
@@ -155,82 +183,66 @@ export default function EvaluationPage() {
                   onClick={() => void load()}
                 >
                   <RefreshCw size={15} />
-                  Refresh list
+                  Refresh
                 </button>
               </div>
             </div>
           </Panel>
 
           <Panel>
-            <SectionHeading eyebrow="History" title="Past evaluation runs" />
+            <SectionHeading
+              eyebrow="History"
+              title="Past runs"
+              detail={`${jobs.length} total`}
+            />
             {loading ? (
-              <LoadingState label="Loading evaluation jobs…" />
+              <LoadingState label="Loading…" />
             ) : jobs.length === 0 ? (
               <p className="muted">No evaluation runs yet.</p>
             ) : (
-              <div className="stack">
+              <div className="stack" style={{ gap: 10 }}>
                 {jobs.map((job) => (
                   <div
                     key={job.id}
-                    className="callout"
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                      border:
-                        activeJobId === job.id
-                          ? "1px solid var(--accent-teal)"
-                          : undefined,
+                    className={`evaluation-history-item ${
+                      activeJobId === job.id ? "evaluation-history-item-active" : ""
+                    }`}
+                    onClick={() => setActiveJobId(job.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveJobId(job.id);
+                      }
                     }}
+                    role="button"
+                    tabIndex={0}
                   >
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      style={{ flex: 1, textAlign: "left", background: "transparent", border: "none" }}
-                      onClick={() => setActiveJobId(job.id)}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
                     >
                       <strong>{job.status}</strong>
-                      <p className="muted" style={{ margin: "4px 0 0" }}>
-                        {shortDate(job.created_at)}
-                      </p>
-                    </button>
-                    <Link href={`/reports/${job.id}`} className="button button-secondary">
-                      Open report
-                    </Link>
+                      <Link
+                        href={`/reports/${job.id}`}
+                        className="button button-secondary"
+                        style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <ExternalLink size={13} />
+                        Report
+                      </Link>
+                    </div>
+                    <span className="muted">{shortDate(job.created_at)}</span>
                   </div>
                 ))}
               </div>
             )}
           </Panel>
-        </div>
-
-        <div className="stack">
-          {activeJob &&
-          !["succeeded", "completed", "failed", "cancelled"].includes(
-            activeJob.status,
-          ) ? (
-            <JobMonitor initialJob={activeJob} kind="pipeline" />
-          ) : report ? (
-            <EvaluationReport report={report} />
-          ) : activeJob?.status === "failed" ? (
-            <ErrorState
-              message={
-                typeof activeJob.error === "string"
-                  ? activeJob.error
-                  : "Evaluation job failed."
-              }
-            />
-          ) : (
-            <Panel>
-              <SectionHeading
-                eyebrow="Report"
-                title="Select or run an evaluation"
-                detail="Completed reports appear here with suite-level metrics and scenario tables."
-              />
-            </Panel>
-          )}
-        </div>
+        </aside>
       </div>
     </>
   );

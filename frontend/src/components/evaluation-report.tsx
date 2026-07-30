@@ -27,7 +27,7 @@ function suiteIcon(suite: string) {
 function MetricGrid({ metrics }: { metrics: JsonRecord[] }) {
   if (!metrics.length) return <p className="muted">No metrics recorded.</p>;
   return (
-    <div className="grid grid-4">
+    <div className="grid evaluation-metric-grid">
       {metrics.map((metric) => (
         <Metric
           key={String(metric.name ?? metric.label)}
