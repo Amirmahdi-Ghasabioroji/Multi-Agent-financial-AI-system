@@ -121,6 +121,8 @@ describe("ResultView", () => {
     expect(screen.getByText(/Positive simulated expectancy/)).toBeInTheDocument();
     expect(screen.getByText("Strategy comparison")).toBeInTheDocument();
     expect(screen.getByText("Playbook signal replay")).toBeInTheDocument();
+    expect(screen.getByText(/\$100\.0k → \$105\.2k/)).toBeInTheDocument();
+    expect(screen.getByText(/Peak 0\.7%/)).toBeInTheDocument();
   });
 
   it("labels multiple execution trade cards", () => {

@@ -1534,6 +1534,100 @@ h3 {
   }
 }
 
+.performance-chart-grid {
+  gap: 14px;
+}
+
+.performance-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  background: linear-gradient(180deg, #101a27 0%, #0c1520 100%);
+  border: 1px solid #1f2f42;
+  border-radius: 12px;
+}
+
+.performance-chart-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.performance-chart-label {
+  font-size: 0.72rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.performance-chart-summary {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.performance-chart-teal {
+  color: var(--teal);
+}
+
+.performance-chart-amber {
+  color: var(--amber);
+}
+
+.performance-chart-red {
+  color: var(--red);
+}
+
+.performance-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.performance-chart-grid line.performance-chart-grid {
+  stroke: #1a2a3d;
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.performance-chart-axis-line {
+  stroke: #2a3d54;
+  stroke-width: 1;
+}
+
+.performance-chart-axis {
+  fill: var(--faint);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.performance-chart-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.performance-chart-area {
+  stroke: none;
+}
+
+.performance-chart-dot-halo {
+  fill: currentColor;
+  opacity: 0.18;
+}
+
+.performance-chart-dot {
+  fill: currentColor;
+  stroke: #0c1520;
+  stroke-width: 1;
+}
+
 .sparkline-block {
   display: flex;
   flex-direction: column;

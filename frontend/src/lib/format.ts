@@ -46,6 +46,35 @@ export function tradeDatePrice(dateValue?: string, priceValue?: unknown) {
   return `${datePart} @ ${pricePart}`;
 }
 
+export function chartAxisDate(value?: string) {
+  if (!value) return "";
+  const date = parseTradeDate(value);
+  if (!date) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+export function formatChartCurrency(value: number) {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
+  if (abs >= 10_000) return `$${(value / 1_000).toFixed(1)}k`;
+  if (abs >= 1_000) return `$${(value / 1_000).toFixed(2)}k`;
+  return `$${value.toFixed(0)}`;
+}
+
+export function formatChartPercent(value: number) {
+  const pct = Math.abs(value) <= 1 ? value * 100 : value;
+  return `${pct.toFixed(pct >= 10 ? 0 : 1)}%`;
+}
+
+export function buildChartTicks(min: number, max: number, count = 4): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
+  if (min === max) return [min];
+  return Array.from({ length: count }, (_, index) => min + ((max - min) / (count - 1)) * index);
+}
+
 export function shortDate(value?: string) {
   if (!value) return "—";
   const date = new Date(value);

@@ -1,4 +1,7 @@
 import {
+  chartAxisDate,
+  formatChartCurrency,
+  formatChartPercent,
   jobLabel,
   jobQuery,
   jobTickers,
@@ -30,6 +33,12 @@ describe("format helpers", () => {
     expect(tradeDatePrice("2025-09-03", 3401.13)).toBe("03 Sept 2025 @ 3401.13");
     expect(tradeDatePrice("2025-09-03")).toBe("03 Sept 2025");
     expect(tradeDatePrice(undefined, 185)).toBe("— @ 185.00");
+  });
+
+  it("formats chart axis labels", () => {
+    expect(chartAxisDate("2024-01-15")).toBe("Jan 2024");
+    expect(formatChartCurrency(105200)).toBe("$105.2k");
+    expect(formatChartPercent(0.052)).toBe("5.2%");
   });
 
   it("chooses the most useful job label", () => {

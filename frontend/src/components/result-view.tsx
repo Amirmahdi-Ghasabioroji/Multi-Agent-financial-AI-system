@@ -1,8 +1,13 @@
 import { Badge, Metric, SectionHeading } from "@/components/ui";
+import { useId } from "react";
 import {
   asRecord,
   asStringList,
+  buildChartTicks,
+  chartAxisDate,
   compactNumber,
+  formatChartCurrency,
+  formatChartPercent,
   getValue,
   percent,
   shortDate,
@@ -539,38 +544,166 @@ function executionCardTitle(
   return parts.length ? parts.join(" · ") : `Trade card ${index + 1}`;
 }
 
-function Sparkline({
+function PerformanceChart({
   values,
   tone = "teal",
   label,
+  variant = "currency",
+  periodStart,
+  periodEnd,
 }: {
   values: number[];
   tone?: "teal" | "amber" | "red";
   label: string;
+  variant?: "currency" | "percent";
+  periodStart?: string;
+  periodEnd?: string;
 }) {
+  const gradientId = useId();
   if (!values.length) return null;
-  const width = 320;
-  const height = 72;
+
+  const width = 360;
+  const height = 148;
+  const margin = { top: 12, right: 14, bottom: 28, left: 58 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const points = values
-    .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * width;
-      const y = height - ((value - min) / range) * (height - 8) - 4;
-      return `${x},${y}`;
-    })
+  const start = values[0];
+  const end = values[values.length - 1];
+  const peakDrawdown = Math.max(...values);
+
+  const formatValue =
+    variant === "percent" ? formatChartPercent : formatChartCurrency;
+
+  const summary =
+    variant === "percent"
+      ? `Peak ${formatChartPercent(peakDrawdown)}`
+      : (() => {
+          const change = start !== 0 ? ((end - start) / Math.abs(start)) * 100 : 0;
+          const sign = change >= 0 ? "+" : "";
+          return `${formatChartCurrency(start)} → ${formatChartCurrency(end)} (${sign}${change.toFixed(1)}%)`;
+        })();
+
+  const yTicks = buildChartTicks(min, max, 4);
+  const xStart = chartAxisDate(periodStart);
+  const xEnd = chartAxisDate(periodEnd);
+
+  const points = values.map((value, index) => {
+    const x = margin.left + (index / Math.max(values.length - 1, 1)) * innerWidth;
+    const y =
+      margin.top + innerHeight - ((value - min) / range) * innerHeight;
+    return { x, y, value };
+  });
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
     .join(" ");
+
+  const areaPath = `${linePath} L ${points[points.length - 1]?.x ?? margin.left} ${
+    margin.top + innerHeight
+  } L ${points[0]?.x ?? margin.left} ${margin.top + innerHeight} Z`;
+
+  const lastPoint = points[points.length - 1];
+
   return (
-    <div className="sparkline-block">
-      <span className="sparkline-label">{label}</span>
+    <div className={`performance-chart performance-chart-${tone}`}>
+      <div className="performance-chart-header">
+        <span className="performance-chart-label">{label}</span>
+        <span className="performance-chart-summary">{summary}</span>
+      </div>
       <svg
-        className={`sparkline sparkline-${tone}`}
+        className="performance-chart-svg"
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={label}
+        aria-label={`${label}: ${summary}`}
       >
-        <polyline fill="none" strokeWidth="2" points={points} />
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
+        {yTicks.map((tick) => {
+          const y = margin.top + innerHeight - ((tick - min) / range) * innerHeight;
+          return (
+            <g key={`y-${tick}`}>
+              <line
+                className="performance-chart-grid"
+                x1={margin.left}
+                y1={y}
+                x2={margin.left + innerWidth}
+                y2={y}
+              />
+              <text
+                className="performance-chart-axis"
+                x={margin.left - 8}
+                y={y + 3}
+                textAnchor="end"
+              >
+                {formatValue(tick)}
+              </text>
+            </g>
+          );
+        })}
+
+        <line
+          className="performance-chart-axis-line"
+          x1={margin.left}
+          y1={margin.top}
+          x2={margin.left}
+          y2={margin.top + innerHeight}
+        />
+        <line
+          className="performance-chart-axis-line"
+          x1={margin.left}
+          y1={margin.top + innerHeight}
+          x2={margin.left + innerWidth}
+          y2={margin.top + innerHeight}
+        />
+
+        <path className="performance-chart-area" d={areaPath} fill={`url(#${gradientId})`} />
+        <path className="performance-chart-line" d={linePath} />
+
+        {lastPoint && (
+          <g>
+            <circle
+              className="performance-chart-dot-halo"
+              cx={lastPoint.x}
+              cy={lastPoint.y}
+              r="5"
+            />
+            <circle
+              className="performance-chart-dot"
+              cx={lastPoint.x}
+              cy={lastPoint.y}
+              r="2.8"
+            />
+          </g>
+        )}
+
+        {xStart && (
+          <text
+            className="performance-chart-axis"
+            x={margin.left}
+            y={height - 8}
+            textAnchor="start"
+          >
+            {xStart}
+          </text>
+        )}
+        {xEnd && (
+          <text
+            className="performance-chart-axis"
+            x={margin.left + innerWidth}
+            y={height - 8}
+            textAnchor="end"
+          >
+            {xEnd}
+          </text>
+        )}
       </svg>
     </div>
   );
@@ -631,10 +764,32 @@ function BacktestPanel({ backtest }: { backtest: JsonRecord }) {
         <Metric label="Trades" value={String(metrics.n_trades ?? "—")} icon={Network} />
       </div>
       {(equity.length > 1 || drawdown.length > 1) && (
-        <div className="grid grid-2" style={{ marginTop: 16 }}>
-          {equity.length > 1 && <Sparkline values={equity} label="Equity curve" />}
+        <div className="grid grid-2 performance-chart-grid" style={{ marginTop: 16 }}>
+          {equity.length > 1 && (
+            <PerformanceChart
+              values={equity}
+              label="Equity curve"
+              periodStart={
+                typeof backtest.period_start === "string" ? backtest.period_start : undefined
+              }
+              periodEnd={
+                typeof backtest.period_end === "string" ? backtest.period_end : undefined
+              }
+            />
+          )}
           {drawdown.length > 1 && (
-            <Sparkline values={drawdown} tone="amber" label="Drawdown" />
+            <PerformanceChart
+              values={drawdown}
+              tone="amber"
+              label="Drawdown"
+              variant="percent"
+              periodStart={
+                typeof backtest.period_start === "string" ? backtest.period_start : undefined
+              }
+              periodEnd={
+                typeof backtest.period_end === "string" ? backtest.period_end : undefined
+              }
+            />
           )}
         </div>
       )}
