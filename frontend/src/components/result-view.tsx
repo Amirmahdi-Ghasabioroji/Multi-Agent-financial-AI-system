@@ -7,6 +7,7 @@ import {
   percent,
   shortDate,
   titleCase,
+  tradeDatePrice,
 } from "@/lib/format";
 import type { Citation, JsonRecord, MAFASResult, RunKind } from "@/lib/types";
 import {
@@ -667,8 +668,18 @@ function BacktestPanel({ backtest }: { backtest: JsonRecord }) {
                 const row = asRecord(trade);
                 return (
                   <tr key={`${row.entry_date}-${index}`}>
-                    <td>{shortDate(typeof row.entry_date === "string" ? row.entry_date : undefined)}</td>
-                    <td>{shortDate(typeof row.exit_date === "string" ? row.exit_date : undefined)}</td>
+                    <td>
+                      {tradeDatePrice(
+                        typeof row.entry_date === "string" ? row.entry_date : undefined,
+                        row.entry_price,
+                      )}
+                    </td>
+                    <td>
+                      {tradeDatePrice(
+                        typeof row.exit_date === "string" ? row.exit_date : undefined,
+                        row.exit_price,
+                      )}
+                    </td>
                     <td>{String(row.outcome ?? "—").toUpperCase()}</td>
                     <td>{compactNumber(row.pnl_r)}</td>
                     <td>${compactNumber(row.pnl_amount)}</td>

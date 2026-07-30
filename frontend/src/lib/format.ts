@@ -6,6 +6,46 @@ export function titleCase(value: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function parseTradeDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (match) {
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function tradeDatePrice(dateValue?: string, priceValue?: unknown) {
+  const price = Number(priceValue);
+  const hasPrice = Number.isFinite(price);
+  if (!dateValue && !hasPrice) return "—";
+
+  let datePart = "—";
+  if (dateValue) {
+    const date = parseTradeDate(dateValue);
+    if (date) {
+      datePart = new Intl.DateTimeFormat("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }).format(date);
+    } else {
+      datePart = dateValue;
+    }
+  }
+
+  if (!hasPrice) return datePart;
+
+  const pricePart = new Intl.NumberFormat("en", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    useGrouping: false,
+  }).format(price);
+
+  return `${datePart} @ ${pricePart}`;
+}
+
 export function shortDate(value?: string) {
   if (!value) return "—";
   const date = new Date(value);

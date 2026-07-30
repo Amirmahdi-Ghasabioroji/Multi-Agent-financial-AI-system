@@ -5,6 +5,7 @@ import {
   parseJsonObject,
   percent,
   titleCase,
+  tradeDatePrice,
 } from "@/lib/format";
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +24,12 @@ describe("format helpers", () => {
     expect(titleCase("risk_on")).toBe("Risk On");
     expect(percent(0.725)).toBe("73%");
     expect(percent(8.2)).toBe("8.2%");
+  });
+
+  it("formats trade timestamps with year and price", () => {
+    expect(tradeDatePrice("2025-09-03", 3401.13)).toBe("03 Sept 2025 @ 3401.13");
+    expect(tradeDatePrice("2025-09-03")).toBe("03 Sept 2025");
+    expect(tradeDatePrice(undefined, 185)).toBe("— @ 185.00");
   });
 
   it("chooses the most useful job label", () => {
