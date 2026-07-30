@@ -163,11 +163,11 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <label className="field">
+    <div className="field">
       <span className="field-label">{label}</span>
       {children}
       {hint && <span className="field-hint">{hint}</span>}
-    </label>
+    </div>
   );
 }
 
