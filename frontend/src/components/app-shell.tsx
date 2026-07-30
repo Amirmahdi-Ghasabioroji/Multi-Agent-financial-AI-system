@@ -10,6 +10,7 @@ import {
   ChartNoAxesCombined,
   ChevronLeft,
   CircleGauge,
+  ClipboardCheck,
   Database,
   FileClock,
   Menu,
@@ -42,6 +43,7 @@ const agentNav: Array<{ href: string; label: string; icon: LucideIcon }> = [
 
 const utilityNav: Array<{ href: string; label: string; icon: LucideIcon }> = [
   { href: "/history", label: "Run history", icon: FileClock },
+  { href: "/evaluation", label: "Evaluation reports", icon: ClipboardCheck },
   { href: "/data", label: "Data & corpus", icon: Database },
 ];
 

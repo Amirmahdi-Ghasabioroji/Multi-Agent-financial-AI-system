@@ -1,5 +1,6 @@
 "use client";
 
+import { EvaluationReport } from "@/components/evaluation-report";
 import { ResultView } from "@/components/result-view";
 import {
   Badge,
@@ -48,6 +49,7 @@ export default function ReportPage() {
   }, [load]);
 
   const kind = (job?.kind ?? job?.agent ?? "pipeline") as RunKind;
+  const isEvaluation = kind === "evaluation";
   const sourceQuery = job ? jobQuery(job) : "";
   const sourceTickers = job ? jobTickers(job) : [];
 
@@ -145,9 +147,19 @@ export default function ReportPage() {
 
           <div style={{ marginTop: 16 }}>
             {job.result ? (
-              <ResultView result={job.result} kind={kind} />
+              isEvaluation ? (
+                <EvaluationReport report={job.result as Record<string, unknown>} />
+              ) : (
+                <ResultView result={job.result} kind={kind} />
+              )
             ) : job.partial_result ? (
-              <ResultView result={job.partial_result} kind={kind} partial />
+              isEvaluation ? (
+                <EvaluationReport
+                  report={job.partial_result as Record<string, unknown>}
+                />
+              ) : (
+                <ResultView result={job.partial_result} kind={kind} partial />
+              )
             ) : (
               <Panel>
                 <SectionHeading

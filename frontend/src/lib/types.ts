@@ -1,5 +1,5 @@
 export type AgentKind = "analyst" | "risk" | "strategy" | "execution";
-export type RunKind = AgentKind | "pipeline";
+export type RunKind = AgentKind | "pipeline" | "evaluation";
 export type JobStatus =
   | "queued"
   | "pending"

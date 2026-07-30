@@ -146,6 +146,7 @@ export default function HistoryPage() {
               <option value="risk">Risk</option>
               <option value="strategy">Strategy</option>
               <option value="execution">Execution</option>
+              <option value="evaluation">Evaluation</option>
             </select>
           </Field>
         </div>

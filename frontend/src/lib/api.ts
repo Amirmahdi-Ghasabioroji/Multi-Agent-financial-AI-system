@@ -139,6 +139,17 @@ export const api = {
       { method: "POST", body: JSON.stringify(payload) },
     ),
 
+  runEvaluation: (payload: {
+    suites?: Array<"rag" | "simulation" | "risk" | "all">;
+    top_k?: number;
+    lookback_days?: number;
+    tickers?: string[];
+  }) =>
+    request<Job>(["/evaluation/run", "/runs/evaluation"], {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   deleteJob: (id: string) =>
     request<void>(
       [`/jobs/${encodeURIComponent(id)}`, `/runs/${encodeURIComponent(id)}`],
