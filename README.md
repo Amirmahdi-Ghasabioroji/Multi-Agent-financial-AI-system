@@ -7,8 +7,10 @@ them against historical price data. Inference runs on a local Ollama model
 (Mistral 7B by default). There are no paid LLM API calls.
 
 A Next.js dashboard wraps the same agent code with conversation history, live
-job progress, and report export. The project is research and simulation only —
-it does not connect to a broker or place orders.
+job progress, report export, and **on-demand evaluation reports** for RAG
+retrieval quality, Monte Carlo calibration, and risk metric completeness. The
+project is research and simulation only — it does not connect to a broker or
+place orders.
 
 For architecture detail, module maps, and design decisions, see
 [`PROJECT_OVERVIEW.md`](PROJECT_OVERVIEW.md).
@@ -61,6 +63,7 @@ Optional API keys (free tiers exist):
 Multi-Agent-financial-AI-system/
 ├── mafas/                  Python agents, RAG, data loaders, tests
 │   ├── agents/             Four agents + orchestrator + simulation/
+│   ├── eval/               On-demand RAG / MC / risk evaluation suites
 │   ├── rag/                Chunking, embeddings, Qdrant retriever
 │   ├── data/               Document and market loaders
 │   ├── tests/
@@ -188,7 +191,8 @@ watchlist (AAPL, MSFT, NVDA, AMZN, GOOGL, JPM).
 ## Setup: full dashboard
 
 The dashboard adds MySQL conversation storage, SSE job progress, per-agent
-workspaces, backtest charts, and demo mode (no Ollama or corpus required).
+workspaces, backtest charts, evaluation reports, and demo mode (no Ollama or
+corpus required).
 
 ### 1. Stop the CLI-only Qdrant container if it is running
 
@@ -228,6 +232,7 @@ docker compose up --build
 | Service | URL |
 |---------|-----|
 | Dashboard | http://localhost:3000 |
+| Evaluation reports | http://localhost:3000/evaluation |
 | API docs | http://localhost:8000/docs |
 | Qdrant | http://localhost:6333 |
 
@@ -249,6 +254,37 @@ Add `-v` only if you intend to delete MySQL data and other named volumes.
 **Demo mode** in the UI runs fixed fixtures (including sample backtest metrics)
 without Ollama, market APIs, or an ingested corpus. Useful for checking the
 interface before live setup is complete.
+
+### Evaluation reports
+
+The **Evaluation reports** page (`/evaluation`) runs on-demand quality checks
+against the live stack. Results are scores only — no automated pass/fail
+thresholds.
+
+| Suite | What it measures | Requirements |
+|-------|------------------|--------------|
+| **RAG** | Corpus size, retrieval hit rate, top-k similarity, source/doc-type diversity on probe queries | Built Qdrant corpus |
+| **Monte Carlo** | Calibration error: empirical TP rate vs MC `P(TP before SL)` on synthetic paths | None (in-process) |
+| **Risk** | Live vol regime, VIX, correlations, sizing completeness, per-asset metrics | Network (yfinance) |
+
+From the UI: open **Evaluation reports** in the sidebar → choose a suite →
+**Run evaluation**. Past runs appear in the list and open as printable reports
+at `/reports/[id]`.
+
+API equivalent:
+
+```powershell
+curl -X POST http://localhost:8000/api/v1/evaluation/run `
+  -H "Content-Type: application/json" `
+  -d "{\"suites\": [\"all\"]}"
+```
+
+Poll `GET /api/v1/jobs/{id}` for the structured report in `result`. Filter run
+history by workflow **Evaluation**.
+
+**Note:** RAG evaluation reports operational retrieval quality (hit rate and
+similarity), not labelled recall@k — that would require a golden relevance
+dataset.
 
 ---
 
@@ -305,6 +341,9 @@ From `mafas/` with the venv active:
 
 # Backtest and execution only (no langgraph corpus analyst required)
 .\.venv\Scripts\python -m pytest tests/test_signals.py tests/test_backtest_metrics.py tests/test_historical_backtest.py tests/test_execution.py -v
+
+# Evaluation harness (simulation suite is offline; RAG/risk need live services)
+.\.venv\Scripts\python -m pytest tests/test_evaluation.py -v
 ```
 
 Live checks (network required):
@@ -414,6 +453,17 @@ the host IP instead of `host.docker.internal`.
 
 Set `TWELVE_DATA_API_KEY` in `.env`. Without a key the agent falls back
 automatically.
+
+**Evaluation RAG suite fails or reports empty corpus**
+
+Build or refresh the document index first (`rag.corpus_builder` or the **Data &
+corpus** page). The RAG suite queries live Qdrant — it does not use demo
+fixtures.
+
+**Evaluation risk suite fails**
+
+The backend container needs outbound network access for yfinance. Confirm market
+data is reachable from inside Docker.
 
 ---
 

@@ -7,7 +7,8 @@
 
 Last updated: **July 2026** — covers all four agents, the **historical backtest +
 forward Monte Carlo simulation stack**, LangGraph orchestration, cross-strategy
-ranking, and the full Next.js/FastAPI/MySQL dashboard.
+ranking, **on-demand evaluation reports** (RAG / MC calibration / risk metrics),
+and the full Next.js/FastAPI/MySQL dashboard.
 
 ---
 
@@ -125,8 +126,8 @@ backend/
   tests/                API/job/persistence tests
   Dockerfile
 frontend/
-  src/app/              Next.js App Router pages
-  src/components/       shell, forms, timelines, result-view (incl. backtest UI)
+  src/app/              Next.js App Router pages (incl. /evaluation)
+  src/components/       shell, forms, timelines, result-view, evaluation-report
   src/lib/              typed API client, schemas/helpers
   Dockerfile
 docker-compose.yml      Full dashboard: frontend + backend + MySQL + Qdrant
@@ -176,6 +177,12 @@ mafas/
     pipeline_schemas.py PipelineState, PipelineResult (+ execution_comparison)
     orchestrator.py   RiskPipeline (LangGraph), build_pipeline()
     __init__.py         lazy public exports (do not add eager heavy imports)
+  eval/                 ★ on-demand evaluation harness (see §11)
+    schemas.py          EvaluationReport, SuiteResult, EvalMetric
+    runner.py           run_evaluation() — orchestrates suites
+    rag_eval.py         live Qdrant retrieval probes
+    simulation_eval.py  MC calibration vs walk-forward outcomes
+    risk_eval.py        live Risk Agent metric completeness
   tests/
     test_prerequisites.py
     test_analyst.py
@@ -186,6 +193,7 @@ mafas/
     test_signals.py           ★ playbook signal unit tests
     test_backtest_metrics.py  ★ performance metrics unit tests
     test_historical_backtest.py ★ historical engine unit tests
+    test_evaluation.py        ★ evaluation harness (simulation offline)
     test_corpus_dashboard.py
     conftest.py
   scripts/
@@ -382,6 +390,34 @@ docker compose up --build
 Demo mode serves deterministic fixtures including backtest metrics and
 `execution_comparison` without Ollama or live market data.
 
+### Evaluation reports (`/evaluation`)
+
+On-demand quality checks run as background jobs (`kind: evaluation`) and store
+a structured `EvaluationReport` in MySQL. **Scores only** — no pass/fail
+thresholds and no golden labelled datasets.
+
+| Suite | Module | Metrics (summary) |
+|-------|--------|-------------------|
+| `rag` | `eval/rag_eval.py` | Corpus size, retrieval hit rate, mean top-1 / top-k cosine similarity, unique sources & doc types per probe query |
+| `simulation` | `eval/simulation_eval.py` | Mean / max calibration error (empirical TP rate vs MC P(TP before SL)), probability mass sum |
+| `risk` | `eval/risk_eval.py` | VIX, vol regime, mean realised vol, correlation cell validity, sizing rows, per-asset vol profile, metric completeness |
+
+**API:** `POST /api/v1/evaluation/run` with body
+`{"suites": ["all"]}` or `["rag", "simulation", "risk"]`. Optional:
+`top_k`, `lookback_days`, `tickers`.
+
+**UI:** sidebar → **Evaluation reports** → run suite → view report inline or at
+`/reports/[id]`. Run history filter: workflow **Evaluation**.
+
+**Prerequisites:**
+
+- RAG suite → ingested Qdrant corpus (same as Analyst).
+- Risk suite → live yfinance from backend (network in Docker).
+- Simulation suite → in-process only (synthetic OHLCV paths).
+
+**Important:** RAG metrics are **operational retrieval quality** (hit rate +
+similarity on fixed probe queries), not labelled recall@k.
+
 ---
 
 ## 8. Conventions when extending
@@ -390,6 +426,18 @@ Demo mode serves deterministic fixtures including backtest metrics and
 
 Pure core module + `*_schemas.py` (Pydantic + `render()`) + agent class with
 `build_*_agent()` + CLI `main()` + mocked unit tests + `smoke_pipeline.py` stage.
+
+### Evaluation / quality assurance changes
+
+- Add pure metric logic under `mafas/eval/` — keep I/O in suite runners only.
+- Extend `EvaluationReport` / `SuiteResult` schemas before touching the dashboard.
+- Wire new suites through `eval/runner.py` and `backend/app/runners.py`
+  (`_evaluation_runner`).
+- Register job kind `evaluation` in `backend/app/schemas.py` and
+  `config/defaults` `job_kinds`.
+- UI: extend `evaluation-report.tsx`; add controls on `/evaluation` page.
+- Do **not** add pass/fail thresholds unless product requirements change —
+  current design is informational scores only.
 
 ### Simulation / backtest changes
 
@@ -439,6 +487,7 @@ Pin in `requirements.txt`. NumPy 2.x requires SciPy ≥ 1.14 and scikit-learn �
 | `test_backtest_metrics.py` | Sharpe, drawdown, profit factor, MC bands |
 | `test_historical_backtest.py` | historical engine, barrier walk |
 | `test_execution.py` | sizing, forward MC, ExecutionAgent, backtest on card |
+| `test_evaluation.py` | MC calibration cases, `run_evaluation(simulation)` |
 | `test_orchestrator.py` | LangGraph paths with fake agents |
 | `test_corpus_dashboard.py` | dashboard/corpus contracts |
 
@@ -467,6 +516,7 @@ FastAPI API
   ├─ bounded background job runner
   ├─ MySQL conversations, events, structured results
   ├─ LangGraph RiskPipeline / per-agent runners
+  ├─ evaluation runner (mafas/eval → job result JSON)
   └─ health, corpus controls, report exports
        ↕
 Qdrant + host Ollama + market/document APIs
@@ -483,6 +533,14 @@ Qdrant + host Ollama + market/document APIs
     win rate, equity + drawdown sparklines (SVG), recent trades table.
 - Demo fixtures in `backend/app/runners.py` include sample `backtest` and
   `execution_comparison` blocks.
+
+### Evaluation visualisation (`frontend/src/components/evaluation-report.tsx`)
+
+- Rendered on `/evaluation` and on `/reports/[id]` when `job.kind === "evaluation"`.
+- **Headline summary** — cross-suite metrics (hit rate, calibration error, etc.).
+- **Per-suite panels** — aggregate metrics + scenario breakdown table.
+- **Methodology notes** — explains live vs labelled metrics and calibration method.
+- No green/red pass-fail badges by design.
 
 ### Other dashboard behaviour
 
@@ -507,7 +565,9 @@ If you are picking up this codebase cold, follow this reading order:
 5. `agents/execution.py` + `execution_schemas.py` — how results become
    `TradeCard` + `ExecutionComparison`.
 6. `frontend/src/components/result-view.tsx` — how JSON reaches the UI.
-7. `backend/app/runners.py` — how the API invokes agents and demo fixtures.
+7. `frontend/src/components/evaluation-report.tsx` — evaluation job output.
+8. `mafas/eval/runner.py` — evaluation suite orchestration.
+9. `backend/app/runners.py` — how the API invokes agents, demo fixtures, and eval.
 
 **Do not confuse:**
 
@@ -520,6 +580,7 @@ If you are picking up this codebase cold, follow this reading order:
 
 ## 13. Possible next steps
 
+- Labelled RAG golden set for true recall@k / precision@k (not implemented in v1).
 - Reinforcement-learning forward scenario module (offline-trained, inference-only).
 - Intrabar high/low modelling in forward MC (currently close-to-close bootstrap).
 - Walk-forward train/test splits for backtest validation reporting.
