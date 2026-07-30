@@ -220,6 +220,18 @@ def test_sse_exports_demo_and_delete(client: TestClient) -> None:
     assert client.get(f"/api/v1/jobs/{job_id}").status_code == 404
 
 
+def test_evaluation_run_returns_structured_report(client: TestClient) -> None:
+    accepted = client.post(
+        "/api/v1/evaluation/run",
+        json={"suites": ["simulation"]},
+    )
+    assert accepted.status_code == 202
+    completed = wait_for_terminal(client, accepted.json()["id"])
+    assert completed["status"] == "succeeded"
+    assert completed["kind"] == "evaluation"
+    assert completed["result"]["suites"][0]["suite"] == "simulation"
+
+
 def test_corpus_reset_requires_exact_confirmation(client: TestClient) -> None:
     rejected = client.post(
         "/api/v1/corpus/reset",

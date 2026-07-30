@@ -451,6 +451,32 @@ def _demo_runner(payload: dict[str, Any], emit: EventEmitter) -> dict[str, Any]:
     return _demo_fixture(payload)
 
 
+def _evaluation_runner(payload: dict[str, Any], emit: EventEmitter) -> dict[str, Any]:
+    ensure_core_import_path()
+    from eval.runner import run_evaluation
+
+    suites = payload.get("suites") or ["all"]
+    emit(
+        "progress",
+        "Starting evaluation suites",
+        {"stage": "evaluation", "suites": suites},
+    )
+
+    def progress(event: str, data: dict[str, Any]) -> None:
+        stage = str(data.get("stage", "evaluation")).replace("_", " ").title()
+        emit(event, f"{stage}: {event.replace('_', ' ')}", data)
+
+    report = run_evaluation(
+        suites=suites,
+        top_k=int(payload.get("top_k", 8)),
+        lookback_days=int(payload.get("lookback_days", 252)),
+        tickers=payload.get("tickers") or None,
+        progress_callback=progress,
+    )
+    emit("progress", "Evaluation completed", {"stage": "evaluation"})
+    return json_safe(report.to_dict())
+
+
 def build_default_runners() -> dict[str, JobRunner]:
     """Build the unified runner registry without constructing core agents."""
     return {
@@ -466,4 +492,5 @@ def build_default_runners() -> dict[str, JobRunner]:
             payload, emit, reset=True
         ),
         "demo": _demo_runner,
+        "evaluation": _evaluation_runner,
     }

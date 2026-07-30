@@ -16,6 +16,7 @@ JobKind = Literal[
     "corpus_refresh",
     "corpus_reset",
     "demo",
+    "evaluation",
 ]
 JobStatus = Literal["queued", "running", "succeeded", "failed"]
 
@@ -257,6 +258,22 @@ class DemoRunRequest(StrictRequest):
     tickers: list[str] = Field(default_factory=lambda: ["AAPL", "MSFT", "NVDA"])
     conversation_id: str | None = None
     demo_mode: Literal[True] = True
+
+
+class EvaluationRunRequest(StrictRequest):
+    """On-demand evaluation of RAG, Monte Carlo, and risk metrics."""
+
+    suites: list[Literal["rag", "simulation", "risk", "all"]] = Field(
+        default_factory=lambda: ["all"]
+    )
+    top_k: int = Field(8, ge=1, le=50)
+    lookback_days: int = Field(252, ge=20, le=2500)
+    tickers: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("tickers")
+    @classmethod
+    def normalise_tickers(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(item.strip().upper() for item in value if item.strip()))
 
 
 class JobSubmitRequest(StrictRequest):

@@ -34,6 +34,32 @@ def corpus_reset_runner(
     return {"operation": "reset", "completed": True}
 
 
+def evaluation_runner(payload: dict[str, Any], emit: EventEmitter) -> dict[str, Any]:
+    emit("progress", "Mock evaluation", {"stage": "evaluation"})
+    return {
+        "generated_at": "2026-07-30T12:00:00+00:00",
+        "suites": [
+            {
+                "suite": "simulation",
+                "label": "Monte Carlo calibration",
+                "status": "completed",
+                "duration_ms": 12.0,
+                "metrics": [
+                    {
+                        "name": "mean_calibration_error",
+                        "label": "Mean calibration error",
+                        "value": 0.04,
+                        "unit": "ratio",
+                    }
+                ],
+                "cases": [],
+            }
+        ],
+        "summary_metrics": [],
+        "notes": ["Mock evaluation report."],
+    }
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     return Settings(
@@ -53,6 +79,7 @@ def runner_overrides() -> dict[str, JobRunner]:
     return {
         "analyst": analyst_runner,
         "corpus_reset": corpus_reset_runner,
+        "evaluation": evaluation_runner,
     }
 
 

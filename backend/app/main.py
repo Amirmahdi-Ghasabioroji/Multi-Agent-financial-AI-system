@@ -38,6 +38,7 @@ from backend.app.schemas import (
     CorpusResetRequest,
     DefaultsResponse,
     DemoRunRequest,
+    EvaluationRunRequest,
     ExecutionRunRequest,
     HealthResponse,
     JobAccepted,
@@ -304,6 +305,7 @@ def create_app(
                 "corpus_refresh",
                 "corpus_reset",
                 "demo",
+                "evaluation",
             ],
         )
 
@@ -597,6 +599,25 @@ def create_app(
         session: Session = Depends(get_session),
     ) -> JobAccepted:
         return submit_job("demo", body.model_dump(mode="json"), service, session)
+
+    @router.post(
+        "/evaluation/run",
+        response_model=JobAccepted,
+        status_code=202,
+        tags=["evaluation"],
+    )
+    @router.post(
+        "/runs/evaluation",
+        response_model=JobAccepted,
+        status_code=202,
+        include_in_schema=False,
+    )
+    def run_evaluation(
+        body: EvaluationRunRequest,
+        service: JobService = Depends(get_job_service),
+        session: Session = Depends(get_session),
+    ) -> JobAccepted:
+        return submit_job("evaluation", body.model_dump(mode="json"), service, session)
 
     @router.post(
         "/conversations",
