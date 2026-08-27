@@ -15,6 +15,8 @@ class RawTrade:
     pnl_r: float
     pnl_amount: float
     bars_held: int
+    entry_date: str | None = None
+    exit_date: str | None = None
 
 
 def max_drawdown(equity: np.ndarray) -> tuple[float, float]:
@@ -109,9 +111,43 @@ def mc_robustness_trade_r(
 
 
 def build_equity_curve(initial_equity: float, trade_pnls: list[float]) -> np.ndarray:
+    """Per-trade equity (not calendar). Prefer ``build_calendar_equity`` for ratios."""
     equity = [initial_equity]
     for pnl in trade_pnls:
         equity.append(equity[-1] + pnl)
+    return np.array(equity, dtype=float)
+
+
+def build_calendar_equity(
+    initial_equity: float,
+    calendar_dates: list[str],
+    trades: list[RawTrade],
+) -> np.ndarray:
+    """Mark cash equity once per calendar session; PnL hits on the exit date.
+
+    The returned series has length ``len(calendar_dates) + 1`` (initial plus
+    end-of-day marks). Sharpe/Sortino/Calmar must be computed on this series
+    with ``periods_per_year=TRADING_DAYS``.
+    """
+    if not calendar_dates:
+        return np.array([initial_equity], dtype=float)
+    pnl_on: dict[str, float] = {}
+    for trade in trades:
+        key = trade.exit_date or ""
+        if not key:
+            continue
+        pnl_on[key] = pnl_on.get(key, 0.0) + trade.pnl_amount
+    date_set = set(calendar_dates)
+    unmatched = [d for d in pnl_on if d not in date_set]
+    if unmatched:
+        last = calendar_dates[-1]
+        for day in unmatched:
+            pnl_on[last] = pnl_on.get(last, 0.0) + pnl_on.pop(day)
+    equity = [initial_equity]
+    running = initial_equity
+    for day in calendar_dates:
+        running += pnl_on.get(day, 0.0)
+        equity.append(running)
     return np.array(equity, dtype=float)
 
 
@@ -120,39 +156,50 @@ def compute_metrics(
     equity: np.ndarray,
     initial_equity: float,
     min_trades: int = 5,
+    *,
+    calendar_days: int | None = None,
 ) -> dict:
     n = len(trades)
     low_sample = n < min_trades
+    empty = {
+        "n_trades": 0,
+        "win_rate": 0.0,
+        "profit_factor": 0.0,
+        "expectancy_r": 0.0,
+        "total_pnl": 0.0,
+        "total_return_pct": 0.0,
+        "max_drawdown_pct": 0.0,
+        "max_drawdown_amount": 0.0,
+        "sharpe_ratio": None,
+        "sortino_ratio": None,
+        "calmar_ratio": None,
+        "avg_win_r": 0.0,
+        "avg_loss_r": 0.0,
+        "avg_bars_held": 0.0,
+        "low_sample": True,
+    }
     if n == 0:
-        return {
-            "n_trades": 0,
-            "win_rate": 0.0,
-            "profit_factor": 0.0,
-            "expectancy_r": 0.0,
-            "total_pnl": 0.0,
-            "total_return_pct": 0.0,
-            "max_drawdown_pct": 0.0,
-            "max_drawdown_amount": 0.0,
-            "sharpe_ratio": None,
-            "sortino_ratio": None,
-            "calmar_ratio": None,
-            "avg_win_r": 0.0,
-            "avg_loss_r": 0.0,
-            "avg_bars_held": 0.0,
-            "low_sample": True,
-        }
+        return empty
 
     wins = [t for t in trades if t.pnl_r > 0]
     losses = [t for t in trades if t.pnl_r <= 0]
     total_pnl = sum(t.pnl_amount for t in trades)
     total_return_pct = total_pnl / initial_equity if initial_equity > 0 else 0.0
     max_dd_amt, max_dd_pct = max_drawdown(equity)
-    sharpe = sharpe_from_equity(equity)
-    sortino = sortino_from_equity(equity)
-    years = max(len(equity) / TRADING_DAYS, 1 / TRADING_DAYS)
-    ann_return = total_return_pct / years if years > 0 else 0.0
-    calmar = (ann_return / max_dd_pct) if max_dd_pct > 0 else None
     pf = profit_factor(trades)
+
+    # Annualised ratios are only defined on a calendar (session) equity curve.
+    # Passing a per-trade curve without calendar_days used to treat each trade
+    # as one trading day and inflate Sharpe/Calmar by ~sqrt(252 / n_trades).
+    sharpe = None
+    sortino = None
+    calmar = None
+    if calendar_days is not None and calendar_days > 0:
+        sharpe = sharpe_from_equity(equity, TRADING_DAYS)
+        sortino = sortino_from_equity(equity, TRADING_DAYS)
+        years = calendar_days / TRADING_DAYS
+        ann_return = total_return_pct / years if years > 0 else 0.0
+        calmar = (ann_return / max_dd_pct) if max_dd_pct > 0 else None
 
     return {
         "n_trades": n,

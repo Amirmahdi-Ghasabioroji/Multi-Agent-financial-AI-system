@@ -11,7 +11,7 @@ from agents.simulation.barrier import HORIZON_BARS, walk_forward_barrier
 from agents.simulation.levels import compute_levels_at_bar
 from agents.simulation.metrics import (
     RawTrade,
-    build_equity_curve,
+    build_calendar_equity,
     compute_metrics,
     downsample_series,
     drawdown_curve,
@@ -187,7 +187,15 @@ def run_historical_backtest(
             )
             pnl_amount = round(pnl_r * pos.risk_amount, 2)
 
-        raw_trades.append(RawTrade(pnl_r=pnl_r, pnl_amount=pnl_amount, bars_held=exit_bar - bar))
+        raw_trades.append(
+            RawTrade(
+                pnl_r=pnl_r,
+                pnl_amount=pnl_amount,
+                bars_held=exit_bar - bar,
+                entry_date=_date_str(df, bar),
+                exit_date=_date_str(df, exit_bar),
+            )
+        )
         records.append(
             TradeRecord(
                 entry_date=_date_str(df, bar),
@@ -204,10 +212,18 @@ def run_historical_backtest(
         last_exit = exit_bar
         bar = exit_bar + 1
 
-    trade_pnls = [t.pnl_amount for t in raw_trades]
-    equity = build_equity_curve(config.account_equity, trade_pnls)
+    calendar_dates = (
+        [_date_str(df, i) for i in range(start_warmup, len(df))]
+        if len(df) > start_warmup
+        else []
+    )
+    equity = build_calendar_equity(config.account_equity, calendar_dates, raw_trades)
     metrics_dict = compute_metrics(
-        raw_trades, equity, config.account_equity, config.min_trades_for_metrics
+        raw_trades,
+        equity,
+        config.account_equity,
+        config.min_trades_for_metrics,
+        calendar_days=len(calendar_dates) or None,
     )
     dd = drawdown_curve(equity)
     pnl_r_vals = [t.pnl_r for t in raw_trades]
