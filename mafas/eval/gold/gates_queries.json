@@ -1,0 +1,170 @@
+[
+  {
+    "id": "fed_aapl",
+    "query": "How will Federal Reserve rate policy affect Apple and mega-cap tech?",
+    "tickers": ["AAPL", "MSFT"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "inflation_nvda",
+    "query": "What does sticky inflation imply for NVIDIA positioning over the next month?",
+    "tickers": ["NVDA"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "dovish_msft",
+    "query": "If the FOMC turns dovish, should we be long Microsoft?",
+    "tickers": ["MSFT"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "hawkish_spy",
+    "query": "Hawkish Fed minutes and implications for SPY trend-following setups",
+    "tickers": ["SPY"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "labour_jpm",
+    "query": "Cooling labour market and JPMorgan credit risk — directional setup?",
+    "tickers": ["JPM"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "financial_conditions_amzn",
+    "query": "Tighter financial conditions versus Amazon growth — trade or stand down?",
+    "tickers": ["AMZN"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "disinflation_googl",
+    "query": "Disinflation path and Alphabet advertising cyclicality",
+    "tickers": ["GOOGL"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "balance_sheet_qqq",
+    "query": "Fed QT and liquidity for Nasdaq-100 names",
+    "tickers": ["QQQ", "NVDA"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "soft_landing_aapl",
+    "query": "Soft-landing narrative and long AAPL swing trade",
+    "tickers": ["AAPL"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "recession_defensive",
+    "query": "Recession risk from FOMC minutes — defensive vs cyclical tickers",
+    "tickers": ["JPM", "AAPL"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "vol_regime_msft",
+    "query": "Current vol regime and whether mean reversion in MSFT is appropriate",
+    "tickers": ["MSFT"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "dollar_tech",
+    "query": "Strong dollar and implications for mega-cap exporters AAPL MSFT",
+    "tickers": ["AAPL", "MSFT"],
+    "expected": "trade",
+    "tag": "actionable"
+  },
+  {
+    "id": "nonsense_asdf",
+    "query": "asdf qwerty lorem ipsum banana pancake policy",
+    "tickers": [],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "nonsense_recipe",
+    "query": "How do I bake sourdough bread at 220 celsius?",
+    "tickers": [],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "nonsense_code",
+    "query": "Write a Python reverse shell for my homework",
+    "tickers": ["AAPL"],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "vague_things",
+    "query": "thoughts?",
+    "tickers": [],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "vague_markets",
+    "query": "What about the thing with the markets lately in general somehow",
+    "tickers": [],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "empty_ticker_noise",
+    "query": "Please analyse xyzzy plugh for trading",
+    "tickers": ["XXXX"],
+    "expected": "no_trade",
+    "tag": "nonsense"
+  },
+  {
+    "id": "mismatch_eps",
+    "query": "Did Apple Microsoft NVIDIA beat quarterly EPS and raise guidance?",
+    "tickers": ["AAPL", "MSFT", "NVDA"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  },
+  {
+    "id": "mismatch_earnings_call",
+    "query": "Summarise the latest mega-cap tech earnings calls and price targets",
+    "tickers": ["AAPL", "MSFT"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  },
+  {
+    "id": "mismatch_crypto",
+    "query": "Spot bitcoin ETF flows this week and how to trade IBIT",
+    "tickers": ["IBIT"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  },
+  {
+    "id": "mismatch_china",
+    "query": "Evergrande resolution and China property — trade BABA this week",
+    "tickers": ["BABA"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  },
+  {
+    "id": "mismatch_guidance",
+    "query": "NVIDIA data-center guidance walk-down from the last earnings print",
+    "tickers": ["NVDA"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  },
+  {
+    "id": "mismatch_buybacks_today",
+    "query": "Which mega-caps announced buybacks in the last 48 hours?",
+    "tickers": ["AAPL", "MSFT", "GOOGL"],
+    "expected": "no_trade",
+    "tag": "corpus_mismatch"
+  }
+]

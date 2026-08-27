@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-EvalSuiteName = Literal["rag", "simulation", "risk"]
+EvalSuiteName = Literal["rag", "simulation", "risk", "analyst", "gates", "strategy"]
 
 
 class EvalMetric(BaseModel):
