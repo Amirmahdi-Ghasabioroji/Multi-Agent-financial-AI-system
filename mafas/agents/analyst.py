@@ -125,6 +125,8 @@ class AnalystAgent:
                 "diversity": 0.0,
                 "recency": 0.0,
                 "llm_self": 0.0,
+                "evidence": 0.0,
+                "display": 0.0,
             },
             llm_self_confidence=0.0,
             model=self.llm.model,
@@ -136,6 +138,7 @@ class AnalystAgent:
         doc_type: str | None = None,
         date_after: str | None = None,
         conversation_context: str | None = None,
+        use_llm: bool = True,
     ) -> MacroBriefing:
         """Retrieve evidence and synthesise a sourced, confidence-scored briefing."""
         logger.info("Analyst briefing requested: '{}'", query)
@@ -150,6 +153,9 @@ class AnalystAgent:
             return self._empty_briefing(query, "No relevant documents found.")
 
         context, citations = self._build_context(hits)
+        if not use_llm:
+            return self._retrieval_only_briefing(query, hits, citations)
+
         messages = self._build_messages(query, context, conversation_context)
 
         try:
@@ -161,6 +167,48 @@ class AnalystAgent:
             return briefing
 
         return self._assemble_briefing(query, parsed, citations, hits)
+
+    def _retrieval_only_briefing(
+        self,
+        query: str,
+        hits: list[dict],
+        citations: list[SourceCitation],
+    ) -> MacroBriefing:
+        """Deterministic briefing from retrieved excerpts — no LLM synthesis."""
+        key_points: list[KeyPoint] = []
+        for i, hit in enumerate(hits[:5], start=1):
+            excerpt = str(hit.get("text", "")).strip().replace("\n", " ")[:220]
+            if not excerpt:
+                continue
+            key_points.append(
+                KeyPoint(
+                    point=excerpt,
+                    citations=[i],
+                    confidence=float(hit.get("score", 0.4)),
+                )
+            )
+        summary_bits = [kp.point for kp in key_points[:2]]
+        overall, breakdown = composite_confidence(
+            scores=[h.get("score", 0.0) for h in hits],
+            sources=[h.get("source", "") for h in hits],
+            doc_types=[h.get("doc_type", "") for h in hits],
+            dates=[h.get("date", "") for h in hits],
+            llm_self_confidence=None,
+        )
+        return MacroBriefing(
+            query=query,
+            summary=(
+                "Retrieval-only briefing (LLM disabled). "
+                + " ".join(summary_bits)
+            ).strip(),
+            key_points=key_points,
+            risks=["No LLM synthesis; points are raw retrieved excerpts."],
+            citations=citations,
+            confidence=overall,
+            confidence_breakdown=breakdown,
+            llm_self_confidence=None,
+            model="retrieval-only",
+        )
 
     def _assemble_briefing(
         self,

@@ -104,7 +104,29 @@ class TestConfidence:
             llm_self_confidence=0.8,
         )
         assert 0.0 <= score <= 1.0
-        assert set(breakdown) == {"retrieval", "diversity", "recency", "llm_self"}
+        assert set(breakdown) >= {
+            "retrieval",
+            "diversity",
+            "recency",
+            "llm_self",
+            "evidence",
+            "display",
+        }
+
+    def test_routing_confidence_ignores_llm_self(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        kwargs = dict(
+            scores=[0.6, 0.55],
+            sources=["a", "b"],
+            doc_types=["fomc_minutes", "news_article"],
+            dates=[today],
+        )
+        low, breakdown_low = composite_confidence(**kwargs, llm_self_confidence=0.0)
+        high, breakdown_high = composite_confidence(**kwargs, llm_self_confidence=1.0)
+        assert low == pytest.approx(high)
+        assert breakdown_low["llm_self"] == pytest.approx(0.0)
+        assert breakdown_high["llm_self"] == pytest.approx(1.0)
+        assert breakdown_high["display"] > breakdown_low["display"]
 
 
 class TestAnalystAgent:
@@ -127,6 +149,16 @@ class TestAnalystAgent:
         assert len(briefing.citations) == 3
         assert briefing.llm_self_confidence == 0.75
         assert 0.0 < briefing.confidence <= 1.0
+        assert briefing.confidence == pytest.approx(briefing.confidence_breakdown["evidence"])
+
+    def test_brief_retrieval_only_skips_llm(self, sample_hits) -> None:
+        llm = FakeLLM({"summary": "should not be used"})
+        agent = AnalystAgent(FakeRetriever(sample_hits), llm)
+        briefing = agent.brief("Fed stance", use_llm=False)
+        assert briefing.model == "retrieval-only"
+        assert llm.last_messages == []
+        assert briefing.key_points
+        assert briefing.confidence == pytest.approx(briefing.confidence_breakdown["evidence"])
 
     def test_brief_handles_no_hits(self) -> None:
         agent = AnalystAgent(FakeRetriever([]), FakeLLM({}))

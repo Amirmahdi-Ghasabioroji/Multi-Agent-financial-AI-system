@@ -1,14 +1,14 @@
 """Composite confidence scoring for sourced analyst briefings.
 
-The score combines four signals, each normalised to [0, 1]:
+Evidence signals (used for *routing* — broaden / proceed):
 
     retrieval   — mean semantic similarity of the supporting evidence
     diversity   — breadth of independent sources and document types
     recency     — how fresh the supporting evidence is
-    llm_self    — the model's self-reported confidence
 
-A higher score means the briefing rests on relevant, corroborated, fresh
-evidence that the model is itself confident about.
+``llm_self`` is the model's uncalibrated self-report. It is stored on the
+breakdown for display and evaluation, but it does **not** enter
+``briefing.confidence`` and therefore cannot open or close orchestrator gates.
 """
 
 from datetime import datetime, timezone
@@ -16,12 +16,29 @@ from email.utils import parsedate_to_datetime
 
 from loguru import logger
 
-WEIGHTS: dict[str, float] = {
+# Display-only blend (not used for routing). Kept so eval can show how much
+# llm_self would have moved the old composite.
+DISPLAY_WEIGHTS: dict[str, float] = {
     "retrieval": 0.35,
     "diversity": 0.25,
     "recency": 0.15,
     "llm_self": 0.25,
 }
+
+# Evidence-only routing weights (DISPLAY_WEIGHTS without llm_self, renormalised).
+_EVIDENCE_MASS = (
+    DISPLAY_WEIGHTS["retrieval"]
+    + DISPLAY_WEIGHTS["diversity"]
+    + DISPLAY_WEIGHTS["recency"]
+)
+ROUTING_WEIGHTS: dict[str, float] = {
+    "retrieval": DISPLAY_WEIGHTS["retrieval"] / _EVIDENCE_MASS,
+    "diversity": DISPLAY_WEIGHTS["diversity"] / _EVIDENCE_MASS,
+    "recency": DISPLAY_WEIGHTS["recency"] / _EVIDENCE_MASS,
+}
+
+# Backward-compatible alias — callers that imported WEIGHTS now see display weights.
+WEIGHTS: dict[str, float] = DISPLAY_WEIGHTS
 
 _DATE_FORMATS = [
     "%Y-%m-%d",
@@ -97,7 +114,12 @@ def composite_confidence(
     dates: list[str],
     llm_self_confidence: float | None,
 ) -> tuple[float, dict[str, float]]:
-    """Combine all signals into one score plus a per-component breakdown."""
+    """Return routing (evidence-only) confidence plus a display breakdown.
+
+    The returned score excludes ``llm_self``. Breakdown still includes
+    ``llm_self`` and ``display`` (the old four-weight blend) so the dashboard
+    and eval suites can show the uncalibrated self-report without using it.
+    """
     components = {
         "retrieval": retrieval_confidence(scores),
         "diversity": source_diversity(sources, doc_types),
@@ -106,6 +128,17 @@ def composite_confidence(
         if llm_self_confidence is not None
         else 0.5,
     }
-    overall = sum(WEIGHTS[k] * components[k] for k in WEIGHTS)
-    logger.debug("Confidence components: {} -> {:.3f}", components, overall)
-    return _clamp(overall), components
+    routing = sum(ROUTING_WEIGHTS[k] * components[k] for k in ROUTING_WEIGHTS)
+    display = sum(DISPLAY_WEIGHTS[k] * components[k] for k in DISPLAY_WEIGHTS)
+    breakdown = {
+        **components,
+        "evidence": _clamp(routing),
+        "display": _clamp(display),
+    }
+    logger.debug(
+        "Confidence components: {} -> routing={:.3f} display={:.3f}",
+        components,
+        routing,
+        display,
+    )
+    return _clamp(routing), breakdown

@@ -20,7 +20,7 @@ class FakeAnalyst:
         self.calls = 0
         self.queries = []
 
-    def brief(self, query, doc_type=None, date_after=None):
+    def brief(self, query, doc_type=None, date_after=None, conversation_context=None, use_llm=True):
         self.queries.append(query)
         conf = self._confidences[min(self.calls, len(self._confidences) - 1)]
         self.calls += 1
@@ -247,9 +247,10 @@ def test_conversation_context_is_forwarded_to_analyst():
             doc_type=None,
             date_after=None,
             conversation_context=None,
+            use_llm=True,
         ):
             self.context = conversation_context
-            return super().brief(query, doc_type=doc_type, date_after=date_after)
+            return super().brief(query, doc_type=doc_type, date_after=date_after, use_llm=use_llm)
 
     analyst = ContextAnalyst([0.8])
     p = _pipeline(
