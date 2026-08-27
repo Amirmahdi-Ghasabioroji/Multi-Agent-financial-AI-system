@@ -86,12 +86,21 @@ def walk_forward_barrier(
     direction: str,
     max_bars: int,
     slippage_bps: float = 5.0,
+    barrier_mode: str = "ohlc",
 ) -> BarrierWalkResult | None:
-    """Walk real OHLCV bars forward from entry until TP, SL, or timeout."""
+    """Walk real OHLCV bars forward from entry until TP, SL, or timeout.
+
+    ``barrier_mode``:
+        * ``ohlc`` — high/low barriers; stop wins if both touched (production backtest).
+        * ``close`` — close-to-close only, matching ``simulate_barrier_bootstrap``.
+    """
     is_long = direction.lower() != "short"
     risk_per_unit = abs(entry_price - stop_price)
     if risk_per_unit <= 0 or entry_bar < 0 or entry_bar >= len(df):
         return None
+    mode = barrier_mode.lower().strip()
+    if mode not in {"ohlc", "close"}:
+        mode = "ohlc"
 
     slip = slippage_bps / 1e4
     entry_fill = entry_price * (1 + slip) if is_long else entry_price * (1 - slip)
@@ -103,9 +112,12 @@ def walk_forward_barrier(
 
     for bar in range(entry_bar + 1, end_bar + 1):
         row = df.iloc[bar]
-        low = float(row["low"])
-        high = float(row["high"])
         close = float(row["close"])
+        if mode == "close":
+            low = high = close
+        else:
+            low = float(row["low"])
+            high = float(row["high"])
 
         if is_long:
             hit = _barrier_hit_long(low, high, stop_price, target_price)
@@ -199,6 +211,133 @@ def simulate_barrier_bootstrap(
                 if price <= target_price:
                     outcome, exit_price, exit_bar = "tp", target_price, bar + 1
                     break
+        else:
+            exit_price = price
+
+        exit_fill = exit_price * (1 - slip) if is_long else exit_price * (1 + slip)
+        pnl_per_unit = (exit_fill - entry_fill) if is_long else (entry_fill - exit_fill)
+
+        r_values[i] = pnl_per_unit / risk_per_unit
+        bars_to_exit[i] = exit_bar
+        mae_values[i] = worst_adverse / risk_per_unit
+        if outcome == "tp":
+            tp_count += 1
+        elif outcome == "sl":
+            sl_count += 1
+        else:
+            timeout_count += 1
+
+    return SimulationResult(
+        n_sims=n_sims,
+        horizon_bars=max_bars,
+        prob_tp_before_sl=round(tp_count / n_sims, 4),
+        prob_sl_before_tp=round(sl_count / n_sims, 4),
+        prob_timeout=round(timeout_count / n_sims, 4),
+        expected_r=round(float(r_values.mean()), 4),
+        win_rate=round(float((r_values > 0).mean()), 4),
+        planned_rr=round(planned_rr, 3),
+        avg_bars_to_exit=round(float(bars_to_exit.mean()), 2),
+        mae_mean_r=round(float(mae_values.mean()), 4),
+        mae_p95_r=round(float(np.percentile(mae_values, 95)), 4),
+        seed=seed,
+    )
+
+
+def ohlc_relative_bars(df: pd.DataFrame) -> np.ndarray:
+    """Bar triples (low_ret, high_ret, close_ret) vs previous close.
+
+    Used by the OHLC bootstrap so forward paths carry range information that
+    matches ``walk_forward_barrier(..., barrier_mode='ohlc')``.
+    """
+    close = df["close"].astype(float).to_numpy()
+    high = df["high"].astype(float).to_numpy()
+    low = df["low"].astype(float).to_numpy()
+    if close.size < 2:
+        return np.empty((0, 3), dtype=float)
+    prev = close[:-1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        close_ret = close[1:] / prev - 1.0
+        high_ret = high[1:] / prev - 1.0
+        low_ret = low[1:] / prev - 1.0
+    stacked = np.column_stack([low_ret, high_ret, close_ret])
+    mask = np.isfinite(stacked).all(axis=1)
+    return stacked[mask]
+
+
+def simulate_barrier_ohlc_bootstrap(
+    bars: np.ndarray,
+    entry_price: float,
+    stop_price: float,
+    target_price: float,
+    direction: str = "long",
+    max_bars: int = 20,
+    n_sims: int = 5000,
+    slippage_bps: float = 5.0,
+    seed: int = 42,
+) -> SimulationResult:
+    """Bootstrap full OHLC bars and apply the same high/low barrier rules as the backtest."""
+    is_long = direction.lower() != "short"
+    pool = np.asarray(bars, dtype=float)
+    if pool.ndim != 2 or pool.shape[1] < 3:
+        pool = np.empty((0, 3), dtype=float)
+    else:
+        pool = pool[np.isfinite(pool).all(axis=1)]
+
+    risk_per_unit = abs(entry_price - stop_price)
+    reward_per_unit = abs(target_price - entry_price)
+    planned_rr = reward_per_unit / risk_per_unit if risk_per_unit > 0 else 0.0
+
+    if pool.shape[0] == 0 or risk_per_unit <= 0 or n_sims <= 0 or max_bars <= 0:
+        return SimulationResult(
+            n_sims=0, horizon_bars=max_bars, prob_tp_before_sl=0.0,
+            prob_sl_before_tp=0.0, prob_timeout=1.0, expected_r=0.0, win_rate=0.0,
+            planned_rr=round(planned_rr, 3), avg_bars_to_exit=0.0,
+            mae_mean_r=0.0, mae_p95_r=0.0, seed=seed,
+        )
+
+    rng = np.random.default_rng(seed)
+    slip = slippage_bps / 1e4
+    entry_fill = entry_price * (1 + slip) if is_long else entry_price * (1 - slip)
+
+    tp_count = sl_count = timeout_count = 0
+    r_values = np.empty(n_sims, dtype=float)
+    bars_to_exit = np.empty(n_sims, dtype=float)
+    mae_values = np.empty(n_sims, dtype=float)
+
+    idx = rng.integers(0, pool.shape[0], size=(n_sims, max_bars))
+
+    for i in range(n_sims):
+        price = entry_price
+        worst_adverse = 0.0
+        outcome = "timeout"
+        exit_price = price
+        exit_bar = max_bars
+
+        for bar in range(max_bars):
+            low_ret, high_ret, close_ret = pool[idx[i, bar]]
+            new_low = price * (1.0 + low_ret)
+            new_high = price * (1.0 + high_ret)
+            new_close = price * (1.0 + close_ret)
+            if new_high < new_low:
+                new_high, new_low = new_low, new_high
+
+            adverse = (entry_fill - new_low) if is_long else (new_high - entry_fill)
+            if adverse > worst_adverse:
+                worst_adverse = adverse
+
+            if is_long:
+                hit = _barrier_hit_long(new_low, new_high, stop_price, target_price)
+            else:
+                hit = _barrier_hit_short(new_low, new_high, stop_price, target_price)
+
+            if hit == "sl":
+                outcome, exit_price, exit_bar = "sl", stop_price, bar + 1
+                break
+            if hit == "tp":
+                outcome, exit_price, exit_bar = "tp", target_price, bar + 1
+                break
+            price = new_close
+            exit_price = new_close
         else:
             exit_price = price
 

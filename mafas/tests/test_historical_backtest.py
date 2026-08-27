@@ -48,10 +48,39 @@ def test_non_overlapping_trades():
         assert cur.entry_date >= prev.exit_date or True  # dates may equal on same bar edge cases
 
 
-def test_walk_forward_barrier_on_real_bars():
+def test_walk_forward_close_vs_ohlc_disagree_on_wick():
     from agents.simulation.barrier import walk_forward_barrier
 
-    df = _trending_df(100)
-    walk = walk_forward_barrier(df, 60, 55.0, 52.0, 65.0, "long", 20)
-    assert walk is not None
-    assert walk.outcome in ("tp", "sl", "timeout")
+    # After entry, one bar with a high wick through TP but close unchanged.
+    n = 80
+    close = [100.0] * n
+    df = pd.DataFrame(
+        {
+            "open": close,
+            "high": [100.0] * n,
+            "low": [99.0] * n,
+            "close": close,
+            "volume": [1_000_000] * n,
+        }
+    )
+    df.loc[70, "high"] = 120.0
+    df.loc[70, "low"] = 99.0
+    df.loc[70, "close"] = 100.0
+    ohlc = walk_forward_barrier(df, 60, 100.0, 97.0, 110.0, "long", 20, barrier_mode="ohlc")
+    close_walk = walk_forward_barrier(df, 60, 100.0, 97.0, 110.0, "long", 20, barrier_mode="close")
+    assert ohlc is not None and close_walk is not None
+    assert ohlc.outcome == "tp"
+    assert close_walk.outcome != "tp"
+
+
+def test_ohlc_bootstrap_runs():
+    from agents.simulation.barrier import ohlc_relative_bars, simulate_barrier_ohlc_bootstrap
+
+    df = _trending_df(200)
+    bars = ohlc_relative_bars(df)
+    res = simulate_barrier_ohlc_bootstrap(
+        bars, 80.0, 76.0, 88.0, direction="long", max_bars=10, n_sims=200, seed=1
+    )
+    mass = res.prob_tp_before_sl + res.prob_sl_before_tp + res.prob_timeout
+    assert abs(mass - 1.0) < 0.02
+    assert res.n_sims == 200
