@@ -12,7 +12,10 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["data*", "rag*", "agents*"]
+include = ["data*", "rag*", "agents*", "eval*"]
+
+[tool.setuptools.package-data]
+eval = ["gold/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

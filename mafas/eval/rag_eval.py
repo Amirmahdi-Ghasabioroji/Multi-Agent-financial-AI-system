@@ -1,7 +1,8 @@
 """Live RAG retrieval evaluation against the Qdrant corpus.
 
-Without labeled relevance judgements this suite reports operational retrieval
-quality: hit rate, similarity scores, and source diversity for probe queries.
+Reports both operational probes (hit rate, cosine) and labelled IR metrics
+(Recall@k, Precision@k, nDCG@k) on a source / doc_type gold set. Labels are
+coarse: they are not passage-level relevance judgements.
 """
 
 from __future__ import annotations
@@ -12,18 +13,11 @@ from collections.abc import Callable
 
 from dotenv import load_dotenv
 
+from eval.ir_metrics import labelled_query_metrics
+from eval.json_util import load_gold
 from eval.schemas import EvalCaseResult, EvalMetric, SuiteResult
 from rag.embedder import TextEmbedder
 from rag.retriever import VectorRetriever
-
-# Probe queries exercised against the live corpus (not golden-labelled).
-PROBE_QUERIES: list[tuple[str, str]] = [
-    ("fed_policy", "Federal Reserve interest rate policy and inflation outlook"),
-    ("sec_filings", "SEC filing revenue operating margin and cash flow"),
-    ("macro_growth", "macroeconomic growth employment and monetary conditions"),
-    ("market_volatility", "equity market volatility risk sentiment and positioning"),
-    ("mega_cap", "mega-cap technology earnings guidance and valuation"),
-]
 
 
 def _mean(values: list[float]) -> float:
@@ -38,7 +32,7 @@ def run_rag_eval(
 ) -> SuiteResult:
     """Evaluate live semantic retrieval against Qdrant."""
     started = time.perf_counter()
-    label = "RAG retrieval (live corpus)"
+    label = "RAG retrieval (labelled + operational)"
     try:
         load_dotenv()
         qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -60,14 +54,24 @@ def run_rag_eval(
                 duration_ms=round((time.perf_counter() - started) * 1000, 1),
             )
 
+        gold = load_gold("rag_queries.json")
+        corpus = retriever.scroll_payloads()
+
         cases: list[EvalCaseResult] = []
         hit_flags: list[float] = []
         top_scores: list[float] = []
         mean_scores: list[float] = []
         source_counts: list[float] = []
         doc_type_counts: list[float] = []
+        precisions: list[float] = []
+        recalls: list[float] = []
+        ndcgs: list[float] = []
+        labelled_hits: list[float] = []
+        failure_recalls: list[float] = []
 
-        for case_id, query in PROBE_QUERIES:
+        for spec in gold:
+            case_id = str(spec.get("id", "query"))
+            query = str(spec.get("query", ""))
             if progress:
                 progress("progress", {"stage": "rag", "case": case_id})
 
@@ -81,13 +85,25 @@ def run_rag_eval(
             avg_score = _mean([float(item["score"]) for item in hits])
             sources = {str(item.get("source", "")) for item in hits if item.get("source")}
             doc_types = {str(item.get("doc_type", "")) for item in hits if item.get("doc_type")}
+            labelled = labelled_query_metrics(hits, corpus, spec, top_k)
 
             hit_flags.append(hit)
             top_scores.append(top_score)
             mean_scores.append(avg_score)
             source_counts.append(float(len(sources)))
             doc_type_counts.append(float(len(doc_types)))
+            precisions.append(labelled["precision_at_k"])
+            recalls.append(labelled["recall_at_k"])
+            ndcgs.append(labelled["ndcg_at_k"])
+            labelled_hits.append(labelled["labelled_hit"])
+            if spec.get("failure_case"):
+                failure_recalls.append(labelled["recall_at_k"])
 
+            notes = (
+                f"failure_case labelled recall@{top_k}={labelled['recall_at_k']}"
+                if spec.get("failure_case")
+                else ", ".join(sorted(doc_types)) if doc_types else "No hits"
+            )
             cases.append(
                 EvalCaseResult(
                     id=case_id,
@@ -95,10 +111,36 @@ def run_rag_eval(
                     metrics=[
                         EvalMetric(
                             name="retrieval_hit",
-                            label="Retrieval hit",
+                            label="Operational hit",
                             value=hit,
                             unit="ratio",
-                            detail="1 when at least one chunk cleared the score threshold.",
+                            detail="1 when any chunk cleared the cosine threshold — not relevance.",
+                        ),
+                        EvalMetric(
+                            name="labelled_hit",
+                            label="Labelled hit",
+                            value=labelled["labelled_hit"],
+                            unit="ratio",
+                            detail="1 when at least one retrieved chunk matches gold doc_type/source.",
+                        ),
+                        EvalMetric(
+                            name="precision_at_k",
+                            label=f"Precision@{top_k}",
+                            value=labelled["precision_at_k"],
+                            unit="ratio",
+                        ),
+                        EvalMetric(
+                            name="recall_at_k",
+                            label=f"Recall@{top_k}",
+                            value=labelled["recall_at_k"],
+                            unit="ratio",
+                            detail=f"{int(labelled['retrieved_relevant'])} / {int(labelled['corpus_relevant'])} gold-relevant chunks.",
+                        ),
+                        EvalMetric(
+                            name="ndcg_at_k",
+                            label=f"nDCG@{top_k}",
+                            value=labelled["ndcg_at_k"],
+                            unit="ratio",
                         ),
                         EvalMetric(
                             name="top_similarity",
@@ -125,24 +167,51 @@ def run_rag_eval(
                             unit="count",
                         ),
                     ],
-                    notes=", ".join(sorted(doc_types)) if doc_types else "No hits",
+                    notes=notes,
                 )
             )
 
         aggregate = [
+            EvalMetric(name="corpus_points", label="Corpus size", value=corpus_size, unit="chunks"),
             EvalMetric(
-                name="corpus_points",
-                label="Corpus size",
-                value=corpus_size,
-                unit="chunks",
+                name="mean_precision_at_k",
+                label=f"Mean precision@{top_k}",
+                value=_mean(precisions),
+                unit="ratio",
+                detail="Gold is source/doc_type patterns, not passage-level relevance.",
+            ),
+            EvalMetric(
+                name="mean_recall_at_k",
+                label=f"Mean recall@{top_k}",
+                value=_mean(recalls),
+                unit="ratio",
+            ),
+            EvalMetric(
+                name="mean_ndcg_at_k",
+                label=f"Mean nDCG@{top_k}",
+                value=_mean(ndcgs),
+                unit="ratio",
+            ),
+            EvalMetric(
+                name="labelled_hit_rate",
+                label="Labelled hit rate",
+                value=_mean(labelled_hits),
+                unit="ratio",
+            ),
+            EvalMetric(
+                name="failure_case_mean_recall",
+                label="Failure-case mean recall",
+                value=_mean(failure_recalls) if failure_recalls else None,
+                unit="ratio",
+                detail="Mega-cap earnings / off-corpus queries. Low recall is expected on a Fed-heavy index.",
             ),
             EvalMetric(
                 name="retrieval_hit_rate",
-                label="Retrieval hit rate",
+                label="Operational hit rate (cosine)",
                 value=_mean(hit_flags),
                 unit="ratio",
                 detail=(
-                    "Share of probe queries returning at least one chunk above "
+                    "Share of queries returning at least one chunk above "
                     f"{score_threshold:.0%} similarity. Not labelled recall@k."
                 ),
             ),
@@ -168,6 +237,12 @@ def run_rag_eval(
                 name="mean_unique_doc_types",
                 label="Mean unique doc types",
                 value=_mean(doc_type_counts),
+                unit="count",
+            ),
+            EvalMetric(
+                name="gold_queries",
+                label="Gold queries",
+                value=len(gold),
                 unit="count",
             ),
         ]

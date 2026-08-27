@@ -172,6 +172,7 @@ class VectorRetriever:
             payload = hit.payload or {}
             results.append(
                 {
+                    "id": str(hit.id),
                     "text": payload.get("text", ""),
                     "score": hit.score,
                     "source": payload.get("source", ""),
@@ -181,3 +182,31 @@ class VectorRetriever:
                 }
             )
         return results
+
+    def scroll_payloads(self, batch_size: int = 128) -> list[dict]:
+        """Return every point payload (no vectors) for labelled recall denominators."""
+        collected: list[dict] = []
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                collected.append(
+                    {
+                        "id": str(point.id),
+                        "text": payload.get("text", ""),
+                        "source": payload.get("source", ""),
+                        "date": payload.get("date", ""),
+                        "doc_type": payload.get("doc_type", ""),
+                        "chunk_index": payload.get("chunk_index", 0),
+                    }
+                )
+            if offset is None:
+                break
+        return collected

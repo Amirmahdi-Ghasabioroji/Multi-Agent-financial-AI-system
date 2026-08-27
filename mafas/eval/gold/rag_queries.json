@@ -1,0 +1,212 @@
+[
+  {
+    "id": "fed_policy",
+    "query": "Federal Reserve interest rate policy and inflation outlook",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve", "fomc"],
+    "failure_case": false
+  },
+  {
+    "id": "fed_dual_mandate",
+    "query": "FOMC dual mandate employment and price stability",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve", "fomc"],
+    "failure_case": false
+  },
+  {
+    "id": "fed_balance_sheet",
+    "query": "Federal Reserve balance sheet quantitative tightening and reserves",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "fed_dots",
+    "query": "FOMC participants projections for the federal funds rate",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve", "fomc"],
+    "failure_case": false
+  },
+  {
+    "id": "inflation_pce",
+    "query": "PCE inflation sticky services prices and disinflation",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "labour_market",
+    "query": "labour market tightness unemployment and wage growth",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "financial_conditions",
+    "query": "financial conditions credit spreads and bank lending standards",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "sec_revenue",
+    "query": "SEC filing revenue operating margin and cash flow",
+    "doc_types": ["sec_filing"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "sec_10k_risk",
+    "query": "Item 1A risk factors in annual 10-K filings",
+    "doc_types": ["sec_filing"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "sec_liquidity",
+    "query": "liquidity cash equivalents and capital expenditures in 10-Q",
+    "doc_types": ["sec_filing"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "aapl_filings",
+    "query": "Apple Inc 10-K 10-Q services revenue and iPhone",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["aapl", "apple"],
+    "failure_case": false
+  },
+  {
+    "id": "msft_filings",
+    "query": "Microsoft 10-K Azure cloud revenue and operating income",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["msft", "microsoft"],
+    "failure_case": false
+  },
+  {
+    "id": "nvda_filings",
+    "query": "NVIDIA 10-K data center GPU revenue",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["nvda", "nvidia"],
+    "failure_case": false
+  },
+  {
+    "id": "amzn_filings",
+    "query": "Amazon 10-K AWS operating income and retail",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["amzn", "amazon"],
+    "failure_case": false
+  },
+  {
+    "id": "googl_filings",
+    "query": "Alphabet Google 10-K advertising revenue YouTube",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["googl", "goog", "alphabet", "google"],
+    "failure_case": false
+  },
+  {
+    "id": "jpm_filings",
+    "query": "JPMorgan Chase 10-K net interest income and credit",
+    "doc_types": ["sec_filing"],
+    "source_includes": ["jpm", "jpmorgan"],
+    "failure_case": false
+  },
+  {
+    "id": "news_markets",
+    "query": "equity market news stocks rally selloff",
+    "doc_types": ["news_article"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "news_fed",
+    "query": "news coverage of Federal Reserve rate decision",
+    "doc_types": ["news_article", "fomc_minutes"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "macro_growth",
+    "query": "macroeconomic growth employment and monetary conditions",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "market_volatility",
+    "query": "equity market volatility risk sentiment and positioning",
+    "doc_types": ["fomc_minutes", "news_article"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "fail_mega_cap_earnings",
+    "query": "mega-cap technology quarterly earnings guidance and valuation",
+    "doc_types": ["sec_filing", "news_article"],
+    "source_includes": ["aapl", "msft", "nvda", "amzn", "googl", "google", "apple", "microsoft", "nvidia", "amazon", "alphabet"],
+    "failure_case": true
+  },
+  {
+    "id": "fail_eps_beat",
+    "query": "did Apple Microsoft NVIDIA beat earnings per share last quarter",
+    "doc_types": ["sec_filing", "news_article"],
+    "source_includes": ["aapl", "msft", "nvda", "apple", "microsoft", "nvidia"],
+    "failure_case": true
+  },
+  {
+    "id": "fail_guidance",
+    "query": "company earnings call forward guidance for mega-cap tech",
+    "doc_types": ["sec_filing", "news_article"],
+    "source_includes": [],
+    "failure_case": true
+  },
+  {
+    "id": "fail_buybacks",
+    "query": "share repurchase authorisation and dividend from latest 10-Q",
+    "doc_types": ["sec_filing"],
+    "source_includes": [],
+    "failure_case": false
+  },
+  {
+    "id": "fail_crypto_etf",
+    "query": "spot bitcoin ETF flows and crypto market structure",
+    "doc_types": ["news_article", "sec_filing"],
+    "source_includes": [],
+    "failure_case": true
+  },
+  {
+    "id": "fail_china_property",
+    "query": "China property sector distress and Evergrande resolution",
+    "doc_types": ["news_article", "fomc_minutes"],
+    "source_includes": [],
+    "failure_case": true
+  },
+  {
+    "id": "oil_inflation",
+    "query": "energy prices oil and inflation implications discussed by the Fed",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "housing",
+    "query": "housing market mortgage rates and residential investment",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "dollar_fx",
+    "query": "US dollar foreign exchange and international financial conditions",
+    "doc_types": ["fomc_minutes"],
+    "source_includes": ["federalreserve"],
+    "failure_case": false
+  },
+  {
+    "id": "bank_stress",
+    "query": "banking system stress deposits and commercial real estate credit",
+    "doc_types": ["fomc_minutes", "sec_filing"],
+    "source_includes": [],
+    "failure_case": false
+  }
+]
