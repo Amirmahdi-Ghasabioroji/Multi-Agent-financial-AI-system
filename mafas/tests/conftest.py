@@ -1,9 +1,12 @@
 """Pytest fixtures for MAFAS prerequisite tests."""
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+os.environ.setdefault("MAFAS_EVAL_OFFLINE", "1")
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
