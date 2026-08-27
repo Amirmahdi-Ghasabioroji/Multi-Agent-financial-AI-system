@@ -19,10 +19,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 const SUITE_OPTIONS = [
-  { id: "all", label: "All suites" },
-  { id: "rag", label: "RAG retrieval (live corpus)" },
+  { id: "all", label: "All suites (RAG, Monte Carlo, Risk)" },
+  { id: "rag", label: "RAG retrieval (labelled + operational)" },
   { id: "simulation", label: "Monte Carlo calibration" },
   { id: "risk", label: "Risk agent metrics" },
+  { id: "analyst", label: "Analyst faithfulness (opt-in)" },
+  { id: "gates", label: "Orchestrator gates sweep (opt-in)" },
+  { id: "strategy", label: "Strategy vs baselines (opt-in)" },
 ] as const;
 
 export default function EvaluationPage() {
@@ -112,7 +115,7 @@ export default function EvaluationPage() {
       <PageHeader
         eyebrow="Quality assurance"
         title="Evaluation reports"
-        description="On-demand checks for live RAG retrieval, Monte Carlo calibration, and risk metric completeness. Results are scores only — no automated pass/fail gates."
+        description="On-demand checks for labelled RAG, aligned Monte Carlo calibration, risk completeness, and opt-in analyst / gates / strategy suites. Scores only — no automated pass/fail."
       >
         <Badge tone="teal">On demand</Badge>
       </PageHeader>
@@ -147,7 +150,7 @@ export default function EvaluationPage() {
             <SectionHeading
               eyebrow="Run"
               title="Launch evaluation"
-              detail="RAG needs corpus. Risk uses live data."
+              detail="All is RAG + MC + Risk. Analyst, gates, and strategy are heavier opt-in suites."
               action={<ClipboardCheck size={18} />}
             />
             <div className="stack">

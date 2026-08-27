@@ -140,7 +140,7 @@ export const api = {
     ),
 
   runEvaluation: (payload: {
-    suites?: Array<"rag" | "simulation" | "risk" | "all">;
+    suites?: Array<"rag" | "simulation" | "risk" | "analyst" | "gates" | "strategy" | "all">;
     top_k?: number;
     lookback_days?: number;
     tickers?: string[];

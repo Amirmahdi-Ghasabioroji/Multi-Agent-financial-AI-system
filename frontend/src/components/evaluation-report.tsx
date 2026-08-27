@@ -1,7 +1,7 @@
 import { Metric, Panel, SectionHeading } from "@/components/ui";
 import { compactNumber, percent } from "@/lib/format";
 import type { JsonRecord } from "@/lib/types";
-import { BarChart3, BrainCircuit, Gauge, ShieldCheck } from "lucide-react";
+import { BarChart3, BrainCircuit, Gauge, GitBranch, ShieldCheck, Sparkles } from "lucide-react";
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" ? (value as JsonRecord) : {};
@@ -21,6 +21,9 @@ function suiteIcon(suite: string) {
   if (suite === "rag") return BrainCircuit;
   if (suite === "simulation") return BarChart3;
   if (suite === "risk") return ShieldCheck;
+  if (suite === "analyst") return Sparkles;
+  if (suite === "gates") return GitBranch;
+  if (suite === "strategy") return Gauge;
   return Gauge;
 }
 
@@ -86,9 +89,19 @@ function SuitePanel({ suite }: { suite: JsonRecord }) {
                   : [];
                 const primary =
                   caseMetrics.find((metric) =>
-                    ["calibration_error", "top_similarity", "realised_vol"].includes(
-                      String(metric.name),
-                    ),
+                    [
+                      "calibration_error",
+                      "brier_score",
+                      "recall_at_k",
+                      "precision_at_k",
+                      "ndcg_at_k",
+                      "groundedness",
+                      "citation_validity",
+                      "precision_trade",
+                      "chosen_sharpe",
+                      "top_similarity",
+                      "realised_vol",
+                    ].includes(String(metric.name)),
                   ) ?? caseMetrics[0];
                 return (
                   <tr key={`${item.id}-${index}`}>
@@ -128,8 +141,9 @@ export function EvaluationReport({ report }: { report: JsonRecord }) {
           <p className="eyebrow">Evaluation report</p>
           <h2>System quality metrics</h2>
           <p>
-            Live retrieval probes, Monte Carlo calibration checks, and risk metric
-            completeness. Scores are informational — no pass/fail thresholds are applied.
+            Live labelled retrieval, aligned Monte Carlo calibration, risk completeness,
+            and opt-in analyst / gates / strategy suites. Scores are informational — no
+            pass/fail thresholds are applied. Orchestrator floors are reported, not retuned.
           </p>
         </div>
       </div>

@@ -261,9 +261,9 @@ class DemoRunRequest(StrictRequest):
 
 
 class EvaluationRunRequest(StrictRequest):
-    """On-demand evaluation of RAG, Monte Carlo, and risk metrics."""
+    """On-demand evaluation. ``all`` is rag + simulation + risk; other suites are opt-in."""
 
-    suites: list[Literal["rag", "simulation", "risk", "all"]] = Field(
+    suites: list[Literal["rag", "simulation", "risk", "analyst", "gates", "strategy", "all"]] = Field(
         default_factory=lambda: ["all"]
     )
     top_k: int = Field(8, ge=1, le=50)
