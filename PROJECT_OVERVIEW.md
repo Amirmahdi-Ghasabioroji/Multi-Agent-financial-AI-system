@@ -5,10 +5,18 @@
 > architecture, every module, key design decisions, conventions, gotchas, and how
 > to run/test everything. **Keep it updated as the project evolves.**
 
-Last updated: **July 2026** — covers all four agents, the **historical backtest +
+Last updated: **August 2026** — covers all four agents, the **historical backtest +
 forward Monte Carlo simulation stack**, LangGraph orchestration, cross-strategy
 ranking, **on-demand evaluation reports** (RAG / MC calibration / risk metrics),
 and the full Next.js/FastAPI/MySQL dashboard.
+
+Evaluation now includes **labelled RAG IR metrics** (Recall@k / Precision@k / nDCG@k
+on a source/doc_type gold set), **aligned Monte Carlo calibration** (close-to-close
+and OHLC engines scored separately, plus live walk-forward Brier scores),
+**calendar-time Sharpe/Sortino/Calmar**, and opt-in suites for **analyst
+faithfulness**, **orchestrator gate sweeps**, and **strategy vs baselines**.
+Analyst routing confidence **excludes llm_self**. Dashboard **all** is still
+rag + simulation + risk; analyst / gates / strategy are opt-in.
 
 ---
 
@@ -180,9 +188,16 @@ mafas/
   eval/                 ★ on-demand evaluation harness (see §11)
     schemas.py          EvaluationReport, SuiteResult, EvalMetric
     runner.py           run_evaluation() — orchestrates suites
-    rag_eval.py         live Qdrant retrieval probes
-    simulation_eval.py  MC calibration vs walk-forward outcomes
+    rag_eval.py         labelled Recall/Precision/nDCG + operational cosine
+    simulation_eval.py  aligned close/OHLC MC + live walk-forward Brier
     risk_eval.py        live Risk Agent metric completeness
+    analyst_eval.py     citation faithfulness + optional LLM-as-judge
+    gates_eval.py       threshold sweep vs labelled trade / no-trade
+    strategy_eval.py    chosen playbook vs SMA50 / B&H / random
+    ir_metrics.py       Precision@k, Recall@k, nDCG@k
+    faithfulness.py     rule-based overlap / contradiction
+    calibration.py      Brier score, reliability bins
+    gold/               rag_queries.json, gates_queries.json
   tests/
     test_prerequisites.py
     test_analyst.py
@@ -214,8 +229,11 @@ mafas/
 - `brief(query, ...) -> MacroBriefing`. **Read-only** over Qdrant.
 - Retrieves top_k=8 (score_threshold 0.30), builds numbered context with
   `<source_data>` tags (prompt-injection hardening), asks Mistral for JSON.
-- **Composite confidence** (`confidence.py`): retrieval (0.35), diversity
-  (0.25), recency (0.15), LLM self-report (0.25).
+- **Composite routing confidence** (`confidence.py`): retrieval, diversity, recency
+  only (renormalised). ``llm_self`` is stored on the breakdown and on
+  ``llm_self_confidence`` for display/eval — it does **not** enter
+  ``briefing.confidence`` and cannot trigger broaden. An old four-weight
+  ``display`` blend is also stored so eval can show the uncalibrated self-report.
 - Graceful empty briefing if no hits or LLM down.
 
 ### Risk Agent (`agents/risk.py`, `risk_metrics.py`, `risk_schemas.py`)
@@ -394,29 +412,46 @@ Demo mode serves deterministic fixtures including backtest metrics and
 
 On-demand quality checks run as background jobs (`kind: evaluation`) and store
 a structured `EvaluationReport` in MySQL. **Scores only** — no pass/fail
-thresholds and no golden labelled datasets.
+thresholds. Orchestrator floors **0.40 / 0.45 / 0.55 are not retuned**.
 
 | Suite | Module | Metrics (summary) |
 |-------|--------|-------------------|
-| `rag` | `eval/rag_eval.py` | Corpus size, retrieval hit rate, mean top-1 / top-k cosine similarity, unique sources & doc types per probe query |
-| `simulation` | `eval/simulation_eval.py` | Mean / max calibration error (empirical TP rate vs MC P(TP before SL)), probability mass sum |
-| `risk` | `eval/risk_eval.py` | VIX, vol regime, mean realised vol, correlation cell validity, sizing rows, per-asset vol profile, metric completeness |
+| `rag` | `eval/rag_eval.py` | Labelled Precision@k / Recall@k / nDCG@k on source/doc_type gold (~30 queries, including Fed-vs-earnings failure cases) **plus** operational cosine hit rate |
+| `simulation` | `eval/simulation_eval.py` | Aligned close-vs-close and OHLC-vs-OHLC calibration on synthetic paths; live AAPL/NVDA/SPY 70/30 walk-forward Brier + reliability bins |
+| `risk` | `eval/risk_eval.py` | VIX, vol regime, mean realised vol, correlation cell validity, sizing rows, metric completeness |
+| `analyst` (opt-in) | `eval/analyst_eval.py` | Citation validity, claim–chunk overlap, groundedness, contradiction rate; optional LLM-as-judge; `llm_self` reported as uncalibrated |
+| `gates` (opt-in) | `eval/gates_eval.py` | Post-hoc 3×3×3 floor sweep on 24 labelled queries, no-LLM and with-LLM traces; precision of trade vs no-trade |
+| `strategy` (opt-in) | `eval/strategy_eval.py` | Chosen playbook calendar Sharpe vs SMA50 / buy-and-hold / random playbook; `llm_used` and invalid-instrument rates |
 
 **API:** `POST /api/v1/evaluation/run` with body
-`{"suites": ["all"]}` or `["rag", "simulation", "risk"]`. Optional:
-`top_k`, `lookback_days`, `tickers`.
+`{"suites": ["all"]}` or any of the suite names above. **`all` = rag + simulation + risk**
+(the original three). analyst / gates / strategy must be requested explicitly.
+Optional: `top_k`, `lookback_days`, `tickers`.
 
 **UI:** sidebar → **Evaluation reports** → run suite → view report inline or at
 `/reports/[id]`. Run history filter: workflow **Evaluation**.
 
 **Prerequisites:**
 
-- RAG suite → ingested Qdrant corpus (same as Analyst).
-- Risk suite → live yfinance from backend (network in Docker).
-- Simulation suite → in-process only (synthetic OHLCV paths).
+- RAG / analyst / gates → ingested Qdrant corpus (same as Analyst).
+- Risk / strategy / live simulation → yfinance from backend (network in Docker).
+- Analyst (LLM path) / gates with-LLM / LLM-as-judge → Ollama.
+- Simulation synthetic cases → in-process (no network). Live MC cases skip cleanly if OHLCV cannot be loaded.
+- Unit tests set `MAFAS_EVAL_OFFLINE=1` so pytest never downloads market data.
 
-**Important:** RAG metrics are **operational retrieval quality** (hit rate +
-similarity on fixed probe queries), not labelled recall@k.
+**Important:** RAG gold is **source / doc_type patterns**, not passage-level
+relevance. A 10-K legal-boilerplate chunk can still count as relevant for an
+earnings query. Failure-case recall is expected to be low on a Fed-heavy corpus.
+
+**Barrier alignment:** historical backtests still use OHLC high/low (stop wins
+ties). Production forward MC is still close-to-close. Evaluation reports **both**
+aligned pairs and does not treat OHLC empirical vs close MC as a calibration
+score. An OHLC bar-bootstrap (`simulate_barrier_ohlc_bootstrap`) exists for the
+OHLC pair.
+
+**Calendar-time metrics:** Sharpe / Sortino / Calmar on `BacktestResult` are
+computed on a **session equity curve** (PnL booked on exit dates, zeros on
+other days), annualised with 252, not on a per-trade equity series.
 
 ---
 
@@ -436,6 +471,7 @@ Pure core module + `*_schemas.py` (Pydantic + `render()`) + agent class with
 - Register job kind `evaluation` in `backend/app/schemas.py` and
   `config/defaults` `job_kinds`.
 - UI: extend `evaluation-report.tsx`; add controls on `/evaluation` page.
+- Keep dashboard `all` as `rag` + `simulation` + `risk`. Heavier suites (`analyst`, `gates`, `strategy`) are opt-in.
 - Do **not** add pass/fail thresholds unless product requirements change —
   current design is informational scores only.
 
@@ -487,7 +523,7 @@ Pin in `requirements.txt`. NumPy 2.x requires SciPy ≥ 1.14 and scikit-learn �
 | `test_backtest_metrics.py` | Sharpe, drawdown, profit factor, MC bands |
 | `test_historical_backtest.py` | historical engine, barrier walk |
 | `test_execution.py` | sizing, forward MC, ExecutionAgent, backtest on card |
-| `test_evaluation.py` | MC calibration cases, `run_evaluation(simulation)` |
+| `test_evaluation.py` | MC calibration, IR metrics, faithfulness, gates sweep, `run_evaluation(simulation)` |
 | `test_orchestrator.py` | LangGraph paths with fake agents |
 | `test_corpus_dashboard.py` | dashboard/corpus contracts |
 
@@ -580,10 +616,11 @@ If you are picking up this codebase cold, follow this reading order:
 
 ## 13. Possible next steps
 
-- Labelled RAG golden set for true recall@k / precision@k (not implemented in v1).
+- Labelled RAG gold is source/doc_type grain; passage-level judgements are still future work.
+- Walk-forward playbook *selection* (choose on train, score on test) is not implemented.
+- Orchestrator floors remain uncalibrated product policy until someone retunes from a gates report.
 - Reinforcement-learning forward scenario module (offline-trained, inference-only).
-- Intrabar high/low modelling in forward MC (currently close-to-close bootstrap).
-- Walk-forward train/test splits for backtest validation reporting.
+- Intrabar high/low in *production* forward MC (eval has an OHLC bar-bootstrap; ExecutionAgent still close-to-close).
 - Scheduled corpus refresh (dashboard has manual refresh/reset today).
 - Optional auth if exposed beyond localhost.
 - Production job queue if moving off single-owner local Docker.
@@ -601,5 +638,8 @@ If you are picking up this codebase cold, follow this reading order:
 | Horizon bars | intraday 5, swing 20, position 60 | `HORIZON_BARS` |
 | Min trades for robust metrics | 5 | `BacktestConfig.min_trades_for_metrics` |
 | Strategy setups per run | up to 3 | `StrategyAgent.top_n_setups` |
+| Analyst routing confidence | evidence only (no llm_self) | `confidence.py` ROUTING_WEIGHTS |
+| Analyst display blend (not used for gates) | 0.35/0.25/0.15/0.25 | `DISPLAY_WEIGHTS` |
 | Analyst confidence threshold | 0.40 | `orchestrator.py` |
 | Setup confidence floor | 0.45 | `orchestrator.py` |
+| High-vol setup floor | 0.55 | `orchestrator.py` |

@@ -263,13 +263,15 @@ thresholds.
 
 | Suite | What it measures | Requirements |
 |-------|------------------|--------------|
-| **RAG** | Corpus size, retrieval hit rate, top-k similarity, source/doc-type diversity on probe queries | Built Qdrant corpus |
-| **Monte Carlo** | Calibration error: empirical TP rate vs MC `P(TP before SL)` on synthetic paths | None (in-process) |
-| **Risk** | Live vol regime, VIX, correlations, sizing completeness, per-asset metrics | Network (yfinance) |
+| **RAG** | Labelled Precision@k / Recall@k / nDCG@k (source/doc_type gold) plus operational cosine hit rate | Built Qdrant corpus |
+| **Monte Carlo** | Aligned close and OHLC calibration; live AAPL/NVDA/SPY walk-forward Brier | Synthetic in-process; live needs yfinance |
+| **Risk** | Live vol regime, VIX, correlations, sizing completeness | Network (yfinance) |
+| **Analyst** (opt-in) | Citation faithfulness / groundedness; optional LLM-as-judge | Corpus + Ollama |
+| **Gates** (opt-in) | Threshold sweep vs labelled trade/no-trade, no-LLM and with-LLM | Corpus; Ollama for with-LLM |
+| **Strategy** (opt-in) | Playbook vs SMA50 / buy-and-hold / random; llm_used rate | Network (yfinance) |
 
 From the UI: open **Evaluation reports** in the sidebar → choose a suite →
-**Run evaluation**. Past runs appear in the list and open as printable reports
-at `/reports/[id]`.
+**Run evaluation**. `All suites` still runs RAG + Monte Carlo + Risk only.
 
 API equivalent:
 
@@ -282,9 +284,8 @@ curl -X POST http://localhost:8000/api/v1/evaluation/run `
 Poll `GET /api/v1/jobs/{id}` for the structured report in `result`. Filter run
 history by workflow **Evaluation**.
 
-**Note:** RAG evaluation reports operational retrieval quality (hit rate and
-similarity), not labelled recall@k — that would require a golden relevance
-dataset.
+**Note:** RAG gold is source/doc_type patterns, not passage-level relevance.
+Orchestrator floors 0.40 / 0.45 / 0.55 are measured by the gates suite, not retuned.
 
 ---
 
